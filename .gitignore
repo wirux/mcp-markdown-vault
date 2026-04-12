@@ -4,3 +4,5 @@ coverage/
 *.tsbuildinfo
 .env
 .DS_Store
+.claude/
+my-vault/
