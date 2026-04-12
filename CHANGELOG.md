@@ -325,3 +325,39 @@ All notable changes to the Obsidian Semantic MCP Server are documented here.
 ### Test Results
 - **277 tests across 22 files — all passing**
 - Clean TypeScript compilation with strict mode
+
+---
+
+## Phase 11 — CI/CD & Semantic Release Pipeline
+
+### Added
+- **Semantic Release** (`.releaserc.json`)
+  - Automated versioning via [Conventional Commits](https://www.conventionalcommits.org/)
+  - Plugin chain: commit-analyzer → release-notes-generator → npm → github → git
+  - Publishes scoped package [`@wirux/mcp-obsidian`](https://www.npmjs.com/package/@wirux/mcp-obsidian) to NPM
+  - Creates GitHub Releases with auto-generated notes
+  - Commits version-bumped `package.json` + `package-lock.json` back with `[skip ci]`
+- **Release workflow** (`.github/workflows/release.yml`)
+  - Triggered on push to `main`
+  - **Job A (ci):** lint + test gate
+  - **Job B (release):** builds TypeScript, runs semantic-release (NPM publish + GitHub Release)
+  - **Job C (docker):** builds and pushes multi-arch Docker image (`linux/amd64` + `linux/arm64`) to `ghcr.io/wirux/mcp-obsidian` — only runs when a new version is published
+  - QEMU emulation for ARM64 cross-compilation
+  - GHA layer caching for Docker builds
+- **PR Check workflow** (`.github/workflows/pr-check.yml`)
+  - Triggered on pull requests to `main`
+  - **Job 1 (test-and-verify):** lint → build → test (277 tests)
+  - **Job 2 (docker-dry-run):** multi-arch Docker build with `push: false` to validate Dockerfile
+- **Package updates** (`package.json`)
+  - Scoped package name: `@wirux/mcp-obsidian`
+  - Added `bin`, `files`, `publishConfig` for NPM distribution
+  - Added `lint` script (`tsc --noEmit`)
+  - Semantic release dev dependencies
+- **Docker Compose** updated to use pre-built image `ghcr.io/wirux/mcp-obsidian:latest` instead of local build
+
+### Dependencies Added (dev)
+- `semantic-release`, `@semantic-release/commit-analyzer`, `@semantic-release/release-notes-generator`, `@semantic-release/npm`, `@semantic-release/github`, `@semantic-release/git`
+
+### Distribution
+- **NPM:** `npm install -g @wirux/mcp-obsidian` or `npx -y @wirux/mcp-obsidian`
+- **Docker:** `docker pull ghcr.io/wirux/mcp-obsidian:latest` (multi-arch: amd64 + arm64)
