@@ -1,14 +1,18 @@
 services:
   mcp-server:
     build: .
-    stdin_open: true
     volumes:
       # Mount your Obsidian vault (read-write)
       - ./my-vault:/vault:rw
     environment:
       - VAULT_PATH=/vault
-      - OLLAMA_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=nomic-embed-text
-      - OLLAMA_DIMENSIONS=768
+      - MCP_TRANSPORT_TYPE=sse
+      - PORT=3000
+      # Embeddings: set OLLAMA_URL to use Ollama, or omit for local embeddings
+      # - OLLAMA_URL=http://host.docker.internal:11434
+      # - OLLAMA_MODEL=nomic-embed-text
+      # - OLLAMA_DIMENSIONS=768
+    ports:
+      - "3000:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"

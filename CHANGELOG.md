@@ -237,3 +237,91 @@ All notable changes to the Obsidian Semantic MCP Server are documented here.
 - **228 tests across 18 files — all passing**
 - Clean TypeScript compilation with strict mode
 - All 7 phases from PLAN.md completed
+
+---
+
+## Phase 8 — Zero-Setup Local Embeddings
+
+### Added
+- `TransformersEmbeddingProvider` (`src/infrastructure/transformers-embedding.ts`)
+  - Implements `IEmbeddingProvider` using `@huggingface/transformers`
+  - Uses `pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')` for 384-dimensional embeddings
+  - Lazy model loading — downloaded on first use, cached locally
+  - Mean pooling + L2 normalization via pipeline options
+  - Wraps load/inference errors into `EmbeddingError`
+- Embedding provider strategy in `src/index.ts`
+  - If `OLLAMA_URL` is explicitly set and Ollama is reachable → use Ollama
+  - If `OLLAMA_URL` is not set → use local `TransformersEmbeddingProvider` (zero-setup)
+  - If `OLLAMA_URL` is set but unreachable → fall back to local with warning
+  - Reachability check via `/api/tags` with 3-second timeout
+- 11 unit tests for `TransformersEmbeddingProvider` (lazy loading, reuse, error wrapping, batch, custom model)
+
+### Dependencies Added
+- `@huggingface/transformers` — in-process ONNX model inference
+
+### Test Results
+- **239 tests across 19 files — all passing**
+- Clean TypeScript compilation with strict mode
+
+---
+
+## Phase 9 — Dual Transport (Stdio & SSE)
+
+### Added
+- `TransportType`, `parseTransportType()`, `createSseApp()`, `startTransport()` (`src/presentation/transport.ts`)
+  - `parseTransportType` validates `MCP_TRANSPORT_TYPE` env var (`stdio` | `sse`)
+  - `createSseApp` creates an Express app with CORS, `GET /sse` (SSE stream), and `POST /messages` (JSON-RPC routing by sessionId)
+  - `startTransport` orchestrates either stdio or SSE startup and returns a `TransportHandle` for graceful shutdown
+  - Each SSE client gets its own `McpServer` + `WorkflowStateMachine` via server factory pattern
+  - Shared dependencies (fsAdapter, vectorStore, embedder) are reused across connections
+- Updated `src/index.ts` composition root
+  - Server factory pattern: creates per-connection McpServer with shared deps + fresh WorkflowStateMachine
+  - `MCP_TRANSPORT_TYPE` and `PORT` env vars
+  - Graceful shutdown closes HTTP server and all active SSE sessions
+- 10 unit tests for transport layer (parseTransportType validation, SSE Express routes, session lifecycle, CORS, multi-client isolation)
+
+### Configuration Matrix (all 4 combinations supported)
+| Transport | Embeddings | Status |
+|---|---|---|
+| stdio + Local (Transformers.js) | Default, zero-setup | Supported |
+| stdio + Ollama | Set `OLLAMA_URL` | Supported |
+| sse + Local (Transformers.js) | Set `MCP_TRANSPORT_TYPE=sse` | Supported |
+| sse + Ollama | Set both `MCP_TRANSPORT_TYPE=sse` and `OLLAMA_URL` | Supported |
+
+### Dependencies Added
+- `express` — HTTP server for SSE transport
+- `cors` — CORS middleware
+- `@types/express`, `@types/cors` (dev)
+
+### Test Results
+- **249 tests across 20 files — all passing**
+- Clean TypeScript compilation with strict mode
+
+---
+
+## Phase 10 — Global Search & Freeform Editing
+
+### Added
+- `VaultSearcher` (`src/use-cases/vault-search.ts`)
+  - Cross-vault keyword search using `FragmentRetriever` with TF-IDF + proximity scoring
+  - Iterates all vault notes, chunks each, scores against query, returns top results ranked globally
+  - Configurable `maxResults` (default 20)
+  - Gracefully skips unreadable files
+- `FreeformEditor` (`src/use-cases/freeform-editor.ts`)
+  - `lineReplace(source, startLine, endLine, content)` — replaces a range of lines (1-based, inclusive)
+  - `stringReplace(source, search, replace, replaceAll?)` — literal string find/replace (no regex)
+  - Throws `FreeformEditError` for invalid line ranges or missing search strings
+- `FreeformEditError` domain error (`src/domain/errors/index.ts`)
+- **view tool** — 2 new actions:
+  - `global_search` — cross-vault keyword search via `VaultSearcher`
+  - `semantic_search` — cross-vault hybrid vector+lexical search via `HybridSearcher`
+- **edit tool** — 2 new operations:
+  - `line_replace` — replace lines by range (requires `startLine`, `endLine`)
+  - `string_replace` — literal string replacement (requires `searchText`, optional `replaceAll`)
+- 8 unit tests for `VaultSearcher` (cross-file ranking, headingPath, keyword matching, maxResults, empty vault, flat content, unreadable files)
+- 12 unit tests for `FreeformEditor` (single/range line replace, multi-line insert, error cases, first/all string replace, multi-line search, whitespace, regex chars)
+- 8 MCP integration tests for new actions/operations (global_search, semantic_search, line_replace, string_replace, error cases)
+
+### Test Results
+- **277 tests across 22 files — all passing**
+- Clean TypeScript compilation with strict mode

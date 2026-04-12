@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Standalone, Dockerized TypeScript MCP (Model Context Protocol) server for Obsidian. Provides headless semantic search, AST-based note editing, and workflow state tracking over Obsidian vaults via the stdio transport.
+Standalone, Dockerized TypeScript MCP (Model Context Protocol) server for Obsidian. Provides headless semantic search, AST-based note editing, and workflow state tracking over Obsidian vaults via stdio or SSE transport.
 
 ## Development Commands
 
@@ -15,7 +15,7 @@ npm install
 # Build (compiles to dist/, excludes test files)
 npx tsc
 
-# Run all tests (228 tests across 18 files)
+# Run all tests (277 tests across 22 files)
 npx vitest run
 
 # Run a single test file
@@ -37,19 +37,23 @@ Clean Architecture with four layers:
 
 - **`src/domain/`** — Domain errors, port interfaces (`IFileSystemAdapter`, `IEmbeddingProvider`, `IVectorStore`), value objects (`SafePath`)
 - **`src/use-cases/`** — Business logic: AST parsing/patching, chunking, scoring, retrieval, hybrid search, workflow state, hints, fuzzy matching, wikilink resolution, vault indexing
-- **`src/infrastructure/`** — Adapters: `LocalFileSystemAdapter` (fs/promises), `OllamaEmbeddingProvider` (REST), `InMemoryVectorStore` (cosine similarity)
-- **`src/presentation/`** — 5 MCP tool bindings via `@modelcontextprotocol/sdk` (`createMcpServer()`)
+- **`src/infrastructure/`** — Adapters: `LocalFileSystemAdapter` (fs/promises), `OllamaEmbeddingProvider` (REST), `TransformersEmbeddingProvider` (local `@huggingface/transformers`), `InMemoryVectorStore` (cosine similarity)
+- **`src/presentation/`** — 5 MCP tool bindings (`createMcpServer()`), transport layer (`transport.ts`: stdio/SSE selection, Express SSE app)
 
-Entry point: `src/index.ts` — composition root, reads env vars, wires dependencies, connects stdio transport.
+Entry point: `src/index.ts` — composition root, reads env vars, wires dependencies, selects transport.
 
 ### Key Subsystems
 
 - **AST Parser** (`markdown-pipeline.ts`, `ast-navigation.ts`, `ast-patcher.ts`): unified pipeline (remark-parse + remark-gfm + remark-frontmatter) for surgical markdown patching (append/prepend/replace by heading or block ID)
 - **Fragment Retrieval** (`chunker.ts`, `scoring.ts`, `fragment-retrieval.ts`): heading-aware markdown chunking with TF-IDF + word proximity scoring
-- **Semantic Search** (`hybrid-search.ts`, `vault-indexer.ts`): hybrid search combining vector similarity (Ollama embeddings) with lexical TF-IDF; background auto-vectorization via chokidar file watcher with debounce
+- **Semantic Search** (`hybrid-search.ts`, `vault-indexer.ts`): hybrid search combining vector similarity with lexical TF-IDF; background auto-vectorization via chokidar file watcher with debounce
+- **Embedding Strategy** (`index.ts`): auto-selects provider — local `TransformersEmbeddingProvider` (zero-setup) or `OllamaEmbeddingProvider` when `OLLAMA_URL` is set and reachable
 - **Workflow** (`workflow-state.ts`, `hints.ts`): Petri net state machine (IDLE → EXPLORING → EDITING → REVIEWING); contextual hints appended to all tool responses
 - **Fuzzy Matching** (`fuzzy-match.ts`): Levenshtein-based typo resilience for edit operations
-- **5 MCP Tools**: vault (CRUD), edit (AST patching), view (fragment retrieval + outline), workflow (state transitions), system (status)
+- **Transport** (`transport.ts`): dual transport — stdio (default, single client) or SSE over HTTP (multi-client); each SSE connection gets its own McpServer + WorkflowStateMachine while sharing fs/vector/embedder deps
+- **Vault Search** (`vault-search.ts`): cross-vault lexical keyword search using FragmentRetriever — no embeddings required
+- **Freeform Editor** (`freeform-editor.ts`): line-range replacement and literal string find/replace as fallback for non-AST content
+- **5 MCP Tools**: vault (CRUD), edit (AST patching + freeform line_replace/string_replace), view (fragment retrieval + global_search + semantic_search + outline), workflow (state transitions), system (status)
 
 ### Security
 
@@ -60,9 +64,11 @@ All file operations route through `SafePath` value object — prevents path trav
 | Variable | Default | Description |
 |---|---|---|
 | `VAULT_PATH` | `/vault` | Obsidian vault directory |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama REST API base URL |
-| `OLLAMA_MODEL` | `nomic-embed-text` | Embedding model name |
-| `OLLAMA_DIMENSIONS` | `768` | Embedding vector dimensions |
+| `MCP_TRANSPORT_TYPE` | `stdio` | Transport: `stdio` (single client) or `sse` (multi-client HTTP) |
+| `PORT` | `3000` | HTTP port (SSE mode only) |
+| `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings; if unset, local embeddings are used |
+| `OLLAMA_MODEL` | `nomic-embed-text` | Ollama embedding model name |
+| `OLLAMA_DIMENSIONS` | `768` | Ollama embedding vector dimensions |
 
 ## Conventions
 

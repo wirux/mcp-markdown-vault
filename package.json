@@ -4,8 +4,18 @@
   "description": "Standalone semantic MCP server for Obsidian vaults",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "obsidian-semantic-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
+    "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -17,14 +27,25 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^12.0.6",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/mdast": "^4.0.4",
     "@types/node": "^25.6.0",
+    "semantic-release": "^25.0.3",
     "typescript": "^6.0.2",
     "vitest": "^4.1.4"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "chokidar": "^5.0.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",

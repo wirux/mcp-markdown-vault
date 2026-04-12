@@ -9,6 +9,9 @@ import { AstNavigator } from "../use-cases/ast-navigation.js";
 import { AstPatcher } from "../use-cases/ast-patcher.js";
 import { FragmentRetriever } from "../use-cases/fragment-retrieval.js";
 import { FuzzyMatcher } from "../use-cases/fuzzy-match.js";
+import { VaultSearcher } from "../use-cases/vault-search.js";
+import { HybridSearcher } from "../use-cases/hybrid-search.js";
+import { FreeformEditor } from "../use-cases/freeform-editor.js";
 import { DomainError } from "../domain/errors/index.js";
 
 export interface McpDependencies {
@@ -82,18 +85,43 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("edit", {
     title: "Edit",
     description:
-      "Surgically edit a note using AST-based patching. Supports append, prepend, replace targeting headings or block IDs. Includes fuzzy matching for typo resilience.",
+      "Edit a note. AST operations (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform operations (line_replace/string_replace) provide fallback editing by line range or literal string.",
     inputSchema: {
       path: z.string(),
-      operation: z.enum(["append", "prepend", "replace"]),
+      operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace"]),
       content: z.string(),
       heading: z.string().optional(),
       headingDepth: z.number().optional(),
       blockId: z.string().optional(),
+      startLine: z.number().optional(),
+      endLine: z.number().optional(),
+      searchText: z.string().optional(),
+      replaceAll: z.boolean().optional(),
     },
-  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId }) => {
+  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll }) => {
     return wrapTool(deps.workflow, "edit", async () => {
       const source = await deps.fsAdapter.readNote(notePath);
+
+      // ── Freeform operations ─────────────────────────────────────
+      if (operation === "line_replace") {
+        if (startLine === undefined || endLine === undefined) {
+          throw new Error("startLine and endLine are required for line_replace");
+        }
+        const result = FreeformEditor.lineReplace(source, startLine, endLine, content);
+        await deps.fsAdapter.writeNote(notePath, result, true);
+        return `Note patched: ${notePath} (line_replace lines ${startLine}-${endLine})`;
+      }
+
+      if (operation === "string_replace") {
+        if (!searchText) {
+          throw new Error("searchText is required for string_replace");
+        }
+        const result = FreeformEditor.stringReplace(source, searchText, content, replaceAll ?? false);
+        await deps.fsAdapter.writeNote(notePath, result, true);
+        return `Note patched: ${notePath} (string_replace)`;
+      }
+
+      // ── AST operations ──────────────────────────────────────────
       const tree = pipeline.parse(source);
 
       // Build target
@@ -134,12 +162,15 @@ export function createMcpServer(deps: McpDependencies): McpServer {
 
   // ── view tool ───────────────────────────────────────────────────
 
+  const vaultSearcher = new VaultSearcher(deps.fsAdapter);
+  const hybridSearcher = new HybridSearcher(deps.vectorStore, deps.embedder);
+
   server.registerTool("view", {
     title: "View",
     description:
-      "View note content: fragment retrieval with query, heading outline, or full read. Optimizes LLM context by returning only relevant sections.",
+      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content).",
     inputSchema: {
-      action: z.enum(["search", "outline", "read"]),
+      action: z.enum(["search", "global_search", "semantic_search", "outline", "read"]),
       path: z.string().optional(),
       query: z.string().optional(),
       maxChunks: z.number().optional(),
@@ -159,6 +190,33 @@ export function createMcpServer(deps: McpDependencies): McpServer {
             text: f.chunk.text,
             score: Math.round(f.score * 1000) / 1000,
             wordCount: f.chunk.wordCount,
+          }));
+        }
+        case "global_search": {
+          if (!query) throw new Error("query is required for global_search");
+          const results = await vaultSearcher.search(query, {
+            maxResults: maxChunks ?? 20,
+          });
+          return results.map((r) => ({
+            filePath: r.filePath,
+            headingPath: r.headingPath,
+            text: r.text,
+            score: Math.round(r.score * 1000) / 1000,
+            wordCount: r.wordCount,
+          }));
+        }
+        case "semantic_search": {
+          if (!query) throw new Error("query is required for semantic_search");
+          const results = await hybridSearcher.search(query, {
+            k: maxChunks ?? 10,
+          });
+          return results.map((r) => ({
+            docPath: r.docPath,
+            headingPath: r.headingPath,
+            text: r.text,
+            score: Math.round(r.score * 1000) / 1000,
+            vectorScore: Math.round(r.vectorScore * 1000) / 1000,
+            lexicalScore: Math.round(r.lexicalScore * 1000) / 1000,
           }));
         }
         case "outline": {

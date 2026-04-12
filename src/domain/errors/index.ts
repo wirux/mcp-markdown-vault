@@ -76,6 +76,15 @@ export class BlockNotFoundError extends DomainError {
   }
 }
 
+// ── Freeform editing errors ───────────────────────────────────────
+
+export class FreeformEditError extends DomainError {
+  constructor(detail: string) {
+    super("FREEFORM_EDIT_FAILED", `Freeform edit failed: ${detail}`);
+    this.name = "FreeformEditError";
+  }
+}
+
 // ── Embedding / Vector errors ──────────────────────────────────────
 
 export class EmbeddingError extends DomainError {
