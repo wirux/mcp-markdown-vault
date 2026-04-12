@@ -296,3 +296,32 @@ All notable changes to the Obsidian Semantic MCP Server are documented here.
 ### Test Results
 - **249 tests across 20 files — all passing**
 - Clean TypeScript compilation with strict mode
+
+---
+
+## Phase 10 — Global Search & Freeform Editing
+
+### Added
+- `VaultSearcher` (`src/use-cases/vault-search.ts`)
+  - Cross-vault keyword search using `FragmentRetriever` with TF-IDF + proximity scoring
+  - Iterates all vault notes, chunks each, scores against query, returns top results ranked globally
+  - Configurable `maxResults` (default 20)
+  - Gracefully skips unreadable files
+- `FreeformEditor` (`src/use-cases/freeform-editor.ts`)
+  - `lineReplace(source, startLine, endLine, content)` — replaces a range of lines (1-based, inclusive)
+  - `stringReplace(source, search, replace, replaceAll?)` — literal string find/replace (no regex)
+  - Throws `FreeformEditError` for invalid line ranges or missing search strings
+- `FreeformEditError` domain error (`src/domain/errors/index.ts`)
+- **view tool** — 2 new actions:
+  - `global_search` — cross-vault keyword search via `VaultSearcher`
+  - `semantic_search` — cross-vault hybrid vector+lexical search via `HybridSearcher`
+- **edit tool** — 2 new operations:
+  - `line_replace` — replace lines by range (requires `startLine`, `endLine`)
+  - `string_replace` — literal string replacement (requires `searchText`, optional `replaceAll`)
+- 8 unit tests for `VaultSearcher` (cross-file ranking, headingPath, keyword matching, maxResults, empty vault, flat content, unreadable files)
+- 12 unit tests for `FreeformEditor` (single/range line replace, multi-line insert, error cases, first/all string replace, multi-line search, whitespace, regex chars)
+- 8 MCP integration tests for new actions/operations (global_search, semantic_search, line_replace, string_replace, error cases)
+
+### Test Results
+- **277 tests across 22 files — all passing**
+- Clean TypeScript compilation with strict mode

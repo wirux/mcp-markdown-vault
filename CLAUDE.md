@@ -15,7 +15,7 @@ npm install
 # Build (compiles to dist/, excludes test files)
 npx tsc
 
-# Run all tests (249 tests across 20 files)
+# Run all tests (277 tests across 22 files)
 npx vitest run
 
 # Run a single test file
@@ -51,7 +51,9 @@ Entry point: `src/index.ts` — composition root, reads env vars, wires dependen
 - **Workflow** (`workflow-state.ts`, `hints.ts`): Petri net state machine (IDLE → EXPLORING → EDITING → REVIEWING); contextual hints appended to all tool responses
 - **Fuzzy Matching** (`fuzzy-match.ts`): Levenshtein-based typo resilience for edit operations
 - **Transport** (`transport.ts`): dual transport — stdio (default, single client) or SSE over HTTP (multi-client); each SSE connection gets its own McpServer + WorkflowStateMachine while sharing fs/vector/embedder deps
-- **5 MCP Tools**: vault (CRUD), edit (AST patching), view (fragment retrieval + outline), workflow (state transitions), system (status)
+- **Vault Search** (`vault-search.ts`): cross-vault lexical keyword search using FragmentRetriever — no embeddings required
+- **Freeform Editor** (`freeform-editor.ts`): line-range replacement and literal string find/replace as fallback for non-AST content
+- **5 MCP Tools**: vault (CRUD), edit (AST patching + freeform line_replace/string_replace), view (fragment retrieval + global_search + semantic_search + outline), workflow (state transitions), system (status)
 
 ### Security
 

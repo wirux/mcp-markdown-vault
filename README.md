@@ -18,8 +18,8 @@ A standalone, Dockerized [Model Context Protocol](https://modelcontextprotocol.i
 | Tool | Description |
 |---|---|
 | **vault** | List, read, create, delete, stat notes |
-| **edit** | Surgical append/prepend/replace by heading, block ID, or document-level |
-| **view** | Fragment retrieval with query, heading outline, full read |
+| **edit** | Surgical append/prepend/replace by heading, block ID, or document-level; freeform line_replace and string_replace fallback |
+| **view** | Fragment retrieval, cross-vault keyword search (global_search), semantic hybrid search (semantic_search), heading outline, full read |
 | **workflow** | Workflow state transitions, status, history, reset |
 | **system** | Server status, indexing info |
 
@@ -133,7 +133,7 @@ See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation and [CHANGELO
 
 ## Testing
 
-249 tests across 20 files, written test-first (TDD).
+277 tests across 22 files, written test-first (TDD).
 
 ```bash
 # Run all tests

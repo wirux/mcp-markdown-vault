@@ -182,6 +182,47 @@ describe("view tool", () => {
     expect(parsed.result.some((h: { title: string }) => h.title === "Hello World")).toBe(true);
     expect(parsed.result.some((h: { title: string }) => h.title === "Getting Started")).toBe(true);
   });
+
+  it("performs global_search across vault", async () => {
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "global_search", query: "learned about MCP" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+    expect(parsed.result.length).toBeGreaterThan(0);
+    expect(parsed.result[0].filePath).toBeDefined();
+    expect(parsed.result[0].score).toBeDefined();
+  });
+
+  it("returns empty for global_search with no matches", async () => {
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "global_search", query: "xyznonexistent" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+    expect(parsed.result).toEqual([]);
+  });
+
+  it("performs semantic_search (returns results or empty based on index)", async () => {
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "semantic_search", query: "hello world" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+    // With an empty vector store, semantic_search returns empty
+    expect(Array.isArray(parsed.result)).toBe(true);
+  });
+
+  it("returns error for global_search without query", async () => {
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "global_search" },
+    });
+    expect(result.isError).toBe(true);
+  });
 });
 
 // ── edit tool ─────────────────────────────────────────────────────
@@ -208,6 +249,74 @@ describe("edit tool", () => {
     );
     expect(fileContent).toContain("Additional info here.");
     expect(fileContent).toContain("## Getting Started");
+  });
+
+  it("replaces lines with line_replace", async () => {
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "daily/2024-01-01.md",
+        operation: "line_replace",
+        startLine: 3,
+        endLine: 3,
+        content: "Today I learned about freeform editing.",
+      },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+    expect(parsed.result).toContain("line_replace");
+
+    const fileContent = await fs.readFile(
+      path.join(tmpDir, "daily/2024-01-01.md"),
+      "utf-8",
+    );
+    expect(fileContent).toContain("Today I learned about freeform editing.");
+    expect(fileContent).not.toContain("Today I learned about MCP.");
+  });
+
+  it("replaces string with string_replace", async () => {
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "hello.md",
+        operation: "string_replace",
+        searchText: "Welcome to the vault.",
+        content: "Welcome to the new vault.",
+      },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+    expect(parsed.result).toContain("string_replace");
+
+    const fileContent = await fs.readFile(
+      path.join(tmpDir, "hello.md"),
+      "utf-8",
+    );
+    expect(fileContent).toContain("Welcome to the new vault.");
+  });
+
+  it("returns error for line_replace without startLine/endLine", async () => {
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "hello.md",
+        operation: "line_replace",
+        content: "x",
+      },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it("returns error for string_replace without searchText", async () => {
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "hello.md",
+        operation: "string_replace",
+        content: "x",
+      },
+    });
+    expect(result.isError).toBe(true);
   });
 });
 
