@@ -1,6 +1,6 @@
 {
   "name": "@wirux/mcp-obsidian",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Standalone semantic MCP server for Obsidian vaults",
   "type": "module",
   "publishConfig": {
