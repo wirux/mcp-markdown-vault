@@ -1,6 +1,6 @@
 {
   "name": "obsidian-semantic-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Standalone semantic MCP server for Obsidian vaults",
   "type": "module",
   "main": "dist/index.js",
