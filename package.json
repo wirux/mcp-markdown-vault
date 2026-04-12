@@ -1,8 +1,11 @@
 {
-  "name": "obsidian-semantic-mcp",
-  "version": "1.0.1",
+  "name": "@wirux/mcp-obsidian",
+  "version": "0.0.0-development",
   "description": "Standalone semantic MCP server for Obsidian vaults",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/index.js",
   "bin": {
     "obsidian-semantic-mcp": "dist/index.js"
