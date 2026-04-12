@@ -23,6 +23,7 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "chokidar": "^5.0.0",
     "remark-frontmatter": "^5.0.0",

@@ -7,7 +7,8 @@ A standalone, Dockerized [Model Context Protocol](https://modelcontextprotocol.i
 - **Headless vault operations** — Read, create, edit, and delete `.md` notes on a Docker volume with strict path traversal protection
 - **Surgical editing** — AST-based patching (append, prepend, replace) targeting specific headings or block IDs without overwriting the entire file
 - **Fragment retrieval** — Heading-aware chunking with TF-IDF + word proximity scoring returns only the relevant sections of long notes, optimizing the LLM context window
-- **Semantic search** — Hybrid search combining vector similarity (via Ollama embeddings) with lexical TF-IDF scoring; background auto-indexing watches for file changes
+- **Semantic search** — Hybrid search combining vector similarity with lexical TF-IDF scoring; background auto-indexing watches for file changes
+- **Zero-setup embeddings** — Built-in local embeddings via `@huggingface/transformers` with automatic Ollama fallback — no external services required
 - **Workflow tracking** — Petri net state machine (IDLE → EXPLORING → EDITING → REVIEWING) with contextual hints guiding the LLM's next steps
 - **Typo resilience** — Levenshtein-based fuzzy matching makes edit operations robust against LLM typos
 
@@ -28,7 +29,7 @@ All tool responses include contextual hints based on the current workflow state.
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 22
-- [Ollama](https://ollama.com/) running locally with an embedding model (e.g. `nomic-embed-text`)
+- (Optional) [Ollama](https://ollama.com/) for higher-quality embeddings — if not available, built-in local embeddings are used automatically
 
 ### Local Development
 
@@ -73,14 +74,26 @@ Add to your MCP client config (e.g. Claude Desktop):
 }
 ```
 
+## Embedding Providers
+
+The server selects an embedding provider automatically:
+
+| `OLLAMA_URL` set? | Ollama reachable? | Provider used |
+|---|---|---|
+| No | — | Local (`@huggingface/transformers`, `Xenova/all-MiniLM-L6-v2`, 384d) |
+| Yes | Yes | Ollama (`nomic-embed-text`, 768d) |
+| Yes | No | Local (fallback with warning) |
+
+No configuration is needed for the local provider — it downloads the model on first use and caches it.
+
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---|---|---|
 | `VAULT_PATH` | `/vault` | Path to the Obsidian vault directory |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama REST API base URL |
-| `OLLAMA_MODEL` | `nomic-embed-text` | Embedding model name |
-| `OLLAMA_DIMENSIONS` | `768` | Embedding vector dimensionality |
+| `OLLAMA_URL` | *(unset)* | Ollama REST API base URL — set to enable Ollama |
+| `OLLAMA_MODEL` | `nomic-embed-text` | Ollama embedding model name |
+| `OLLAMA_DIMENSIONS` | `768` | Ollama embedding vector dimensionality |
 
 ## Architecture
 
@@ -98,7 +111,7 @@ See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation and [CHANGELO
 
 ## Testing
 
-228 tests across 18 files, written test-first (TDD).
+239 tests across 19 files, written test-first (TDD).
 
 ```bash
 # Run all tests

@@ -4,11 +4,11 @@ services:
     stdin_open: true
     volumes:
       # Mount your Obsidian vault (read-write)
-      - ./my-vault:/vault:rw
+      - "/Users/adamwilczek/Library/Mobile Documents/iCloud~md~obsidian/Documents/nobleBrainer:/vault:rw"
     environment:
       - VAULT_PATH=/vault
-      - OLLAMA_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=nomic-embed-text
-      - OLLAMA_DIMENSIONS=768
+      # - OLLAMA_URL=http://host.docker.internal:11434
+      # - OLLAMA_MODEL=nomic-embed-text
+      # - OLLAMA_DIMENSIONS=768
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -237,3 +237,28 @@ All notable changes to the Obsidian Semantic MCP Server are documented here.
 - **228 tests across 18 files — all passing**
 - Clean TypeScript compilation with strict mode
 - All 7 phases from PLAN.md completed
+
+---
+
+## Phase 8 — Zero-Setup Local Embeddings
+
+### Added
+- `TransformersEmbeddingProvider` (`src/infrastructure/transformers-embedding.ts`)
+  - Implements `IEmbeddingProvider` using `@huggingface/transformers`
+  - Uses `pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')` for 384-dimensional embeddings
+  - Lazy model loading — downloaded on first use, cached locally
+  - Mean pooling + L2 normalization via pipeline options
+  - Wraps load/inference errors into `EmbeddingError`
+- Embedding provider strategy in `src/index.ts`
+  - If `OLLAMA_URL` is explicitly set and Ollama is reachable → use Ollama
+  - If `OLLAMA_URL` is not set → use local `TransformersEmbeddingProvider` (zero-setup)
+  - If `OLLAMA_URL` is set but unreachable → fall back to local with warning
+  - Reachability check via `/api/tags` with 3-second timeout
+- 11 unit tests for `TransformersEmbeddingProvider` (lazy loading, reuse, error wrapping, batch, custom model)
+
+### Dependencies Added
+- `@huggingface/transformers` — in-process ONNX model inference
+
+### Test Results
+- **239 tests across 19 files — all passing**
+- Clean TypeScript compilation with strict mode
