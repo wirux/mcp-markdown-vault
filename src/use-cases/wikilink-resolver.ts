@@ -1,7 +1,7 @@
 import path from "node:path";
 
 /**
- * Resolves Obsidian-style [[wikilinks]] to vault-relative file paths.
+ * Resolves [[wikilinks]] (Obsidian/markdown style) to vault-relative file paths.
  *
  * Uses the "Shortest Path" algorithm: when multiple files share the same
  * filename, the one with the fewest path segments wins.

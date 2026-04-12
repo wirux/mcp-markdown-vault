@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Standalone, Dockerized TypeScript MCP (Model Context Protocol) server for Obsidian. Provides headless semantic search, AST-based note editing, and workflow state tracking over Obsidian vaults via stdio or SSE transport.
+Headless, Dockerized TypeScript MCP (Model Context Protocol) server for markdown-based knowledge bases (Obsidian, Logseq, Dendron, Foam, or any folder of `.md` files). Provides semantic search, AST-based note editing, and workflow state tracking via stdio or SSE transport.
 
 ## Development Commands
 
@@ -63,7 +63,7 @@ All file operations route through `SafePath` value object — prevents path trav
 
 | Variable | Default | Description |
 |---|---|---|
-| `VAULT_PATH` | `/vault` | Obsidian vault directory |
+| `VAULT_PATH` | `/vault` | Markdown vault directory |
 | `MCP_TRANSPORT_TYPE` | `stdio` | Transport: `stdio` (single client) or `sse` (multi-client HTTP) |
 | `PORT` | `3000` | HTTP port (SSE mode only) |
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings; if unset, local embeddings are used |
@@ -100,8 +100,8 @@ All file operations route through `SafePath` value object — prevents path trav
 ### CI/CD & Release
 
 - **Semantic Release** via `.releaserc.json` — version bumps from [Conventional Commits](https://www.conventionalcommits.org/) (`feat:` = minor, `fix:` = patch, `feat!:` = major)
-- **NPM:** published as `@wirux/mcp-obsidian` (scoped, public)
-- **Docker:** multi-arch images (`linux/amd64` + `linux/arm64`) pushed to `ghcr.io/wirux/mcp-obsidian`
+- **NPM:** published as `@wirux/mcp-markdown-vault` (scoped, public)
+- **Docker:** multi-arch images (`linux/amd64` + `linux/arm64`) pushed to `ghcr.io/wirux/mcp-markdown-vault`
 - **PR Check** (`.github/workflows/pr-check.yml`): lint → build → test → Docker dry run on every PR to `main`
 - **Release** (`.github/workflows/release.yml`): lint → test → semantic-release → Docker build & push on push to `main`
-- `docker-compose.yml` uses the pre-built `ghcr.io/wirux/mcp-obsidian:latest` image (not local build)
+- `docker-compose.yml` uses the pre-built `ghcr.io/wirux/mcp-markdown-vault:latest` image (not local build)

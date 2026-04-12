@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for considering contributing to the Obsidian Semantic MCP Server.
+Thank you for considering contributing to the Markdown Vault MCP Server.
 
 ## Development Setup
 

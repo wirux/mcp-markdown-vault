@@ -1,21 +1,37 @@
 <div align="center">
 
-# 🔮 Obsidian Semantic MCP Server
+# 📁 Markdown Vault MCP Server
 
-**A headless, Dockerized [MCP](https://modelcontextprotocol.io/) server for [Obsidian](https://obsidian.md/) vaults**
+**A headless, semantic [MCP](https://modelcontextprotocol.io/) server for any markdown-based knowledge base**
 
-Semantic search, surgical editing, and workflow tracking — no Obsidian app required.
+Works with Obsidian, Logseq, Dendron, Foam, or any folder of markdown files — no specific app required.
 
+<!-- Note: Badge URLs reference the current GitHub repo (Wirux/mcp-obsidian). -->
+<!-- Update these if/when the repo is renamed to mcp-markdown-vault. -->
 [![CI / Release](https://github.com/Wirux/mcp-obsidian/actions/workflows/release.yml/badge.svg)](https://github.com/Wirux/mcp-obsidian/actions/workflows/release.yml)
 [![PR Check](https://github.com/Wirux/mcp-obsidian/actions/workflows/pr-check.yml/badge.svg)](https://github.com/Wirux/mcp-obsidian/actions/workflows/pr-check.yml)
-[![npm version](https://img.shields.io/npm/v/@wirux/mcp-obsidian?color=cb3837&logo=npm)](https://www.npmjs.com/package/@wirux/mcp-obsidian)
-[![Docker](https://img.shields.io/badge/ghcr.io-mcp--obsidian-blue?logo=docker)](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-obsidian)
+[![npm version](https://img.shields.io/npm/v/@wirux/mcp-markdown-vault?color=cb3837&logo=npm)](https://www.npmjs.com/package/@wirux/mcp-markdown-vault)
+[![Docker](https://img.shields.io/badge/ghcr.io-mcp--markdown--vault-blue?logo=docker)](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-markdown-vault)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/tests-277%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
 
 </div>
+
+---
+
+## 🗂️ Works With
+
+| | Tool | Support |
+|---|---|---|
+| 💎 | **[Obsidian](https://obsidian.md/)** | Full support — wikilinks, block IDs, YAML frontmatter |
+| 📓 | **[Logseq](https://logseq.com/)** | Markdown files with heading-based structure |
+| 🌳 | **[Dendron](https://www.dendron.so/)** | Hierarchical markdown notes |
+| 🫧 | **[Foam](https://foambubble.github.io/foam/)** | VS Code markdown knowledge base |
+| 📂 | **Any markdown folder** | Plain `.md` files in any directory structure |
+
+> The server operates directly on your markdown files. No plugins, no sync, no app dependency.
 
 ---
 
@@ -59,13 +75,13 @@ Semantic search, surgical editing, and workflow tracking — no Obsidian app req
 ### 📦 Install from NPM
 
 ```bash
-npm install -g @wirux/mcp-obsidian
+npm install -g @wirux/mcp-markdown-vault
 ```
 
 Then run directly:
 
 ```bash
-VAULT_PATH=/path/to/your/vault obsidian-semantic-mcp
+VAULT_PATH=/path/to/your/vault markdown-vault-mcp
 ```
 
 ### 🔌 MCP Client Configuration
@@ -75,9 +91,9 @@ Add to your MCP client config (e.g. Claude Desktop, Claude Code):
 ```json
 {
   "mcpServers": {
-    "obsidian": {
+    "markdown-vault": {
       "command": "npx",
-      "args": ["-y", "@wirux/mcp-obsidian"],
+      "args": ["-y", "@wirux/mcp-markdown-vault"],
       "env": {
         "VAULT_PATH": "/path/to/your/vault"
       }
@@ -93,7 +109,7 @@ Add to your MCP client config (e.g. Claude Desktop, Claude Code):
 Pull the pre-built multi-arch image from GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/wirux/mcp-obsidian:latest
+docker pull ghcr.io/wirux/mcp-markdown-vault:latest
 ```
 
 Or use Docker Compose:
@@ -102,7 +118,7 @@ Or use Docker Compose:
 docker compose up
 ```
 
-Edit `docker-compose.yml` to point at your Obsidian vault directory. The default compose file uses SSE transport on port 3000.
+Edit `docker-compose.yml` to point at your markdown vault directory. The default compose file uses SSE transport on port 3000.
 
 ### 🛠️ Development (from source)
 
@@ -129,7 +145,7 @@ VAULT_PATH=/path/to/your/vault node dist/index.js
 - `POST /messages?sessionId=...` — receives JSON-RPC messages
 
 ```bash
-MCP_TRANSPORT_TYPE=sse PORT=3000 VAULT_PATH=/path/to/vault npx @wirux/mcp-obsidian
+MCP_TRANSPORT_TYPE=sse PORT=3000 VAULT_PATH=/path/to/vault npx @wirux/mcp-markdown-vault
 ```
 
 Each SSE client gets its own workflow state. Shared resources (vault, vector index, embedder) are reused across all connections.
@@ -154,7 +170,7 @@ The server selects an embedding provider automatically:
 
 | Variable | Default | Description |
 |---|---|---|
-| `VAULT_PATH` | `/vault` | Obsidian vault directory |
+| `VAULT_PATH` | `/vault` | Markdown vault directory |
 | `MCP_TRANSPORT_TYPE` | `stdio` | `stdio` (single client) or `sse` (multi-client HTTP) |
 | `PORT` | `3000` | HTTP port (SSE mode only) |
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings |
@@ -190,8 +206,8 @@ Fully automated via GitHub Actions and [Semantic Release](https://semantic-relea
 
 - Versioning follows [Conventional Commits](https://www.conventionalcommits.org/) — `feat:` = minor, `fix:` = patch, `feat!:` / `BREAKING CHANGE:` = major
 - Docker images are built for `linux/amd64` and `linux/arm64` via QEMU
-- NPM package published as [`@wirux/mcp-obsidian`](https://www.npmjs.com/package/@wirux/mcp-obsidian)
-- Docker image available at [`ghcr.io/wirux/mcp-obsidian`](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-obsidian)
+- NPM package published as [`@wirux/mcp-markdown-vault`](https://www.npmjs.com/package/@wirux/mcp-markdown-vault)
+- Docker image available at [`ghcr.io/wirux/mcp-markdown-vault`](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-markdown-vault)
 
 ---
 
