@@ -1,8 +1,8 @@
 services:
   mcp-server:
-    image: ghcr.io/wirux/mcp-obsidian:latest
+    image: ghcr.io/wirux/mcp-markdown-vault:latest
     volumes:
-      # Mount your Obsidian vault (read-write)
+      # Mount your markdown vault (read-write)
       - ./my-vault:/vault:rw
     environment:
       - VAULT_PATH=/vault

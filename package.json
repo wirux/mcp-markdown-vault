@@ -1,14 +1,14 @@
 {
-  "name": "@wirux/mcp-obsidian",
-  "version": "1.0.3",
-  "description": "Standalone semantic MCP server for Obsidian vaults",
+  "name": "@wirux/mcp-markdown-vault",
+  "version": "0.0.0-development",
+  "description": "Headless semantic MCP server for Obsidian, Logseq, Dendron and any markdown-based knowledge base",
   "type": "module",
   "publishConfig": {
     "access": "public"
   },
   "main": "dist/index.js",
   "bin": {
-    "obsidian-semantic-mcp": "dist/index.js"
+    "markdown-vault-mcp": "dist/index.js"
   },
   "files": [
     "dist"
@@ -23,7 +23,14 @@
   "keywords": [
     "mcp",
     "obsidian",
-    "semantic-search"
+    "logseq",
+    "dendron",
+    "foam",
+    "markdown",
+    "knowledge-base",
+    "pkm",
+    "semantic-search",
+    "vector-search"
   ],
   "license": "MIT",
   "devDependencies": {

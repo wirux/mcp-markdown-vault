@@ -27,7 +27,7 @@ export interface McpDependencies {
  */
 export function createMcpServer(deps: McpDependencies): McpServer {
   const server = new McpServer({
-    name: "obsidian-semantic-mcp",
+    name: "markdown-vault-mcp",
     version: "0.1.0",
   });
 
@@ -39,7 +39,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("vault", {
     title: "Vault",
     description:
-      "Manage vault notes: list, read, create, delete, stat. Operates on .md files in the Obsidian vault.",
+      "Manage vault notes: list, read, create, delete, stat. Operates on .md files in the markdown vault.",
     inputSchema: {
       action: z.enum(["list", "read", "create", "delete", "stat"]),
       path: z.string().optional(),

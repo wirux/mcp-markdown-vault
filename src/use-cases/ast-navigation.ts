@@ -75,7 +75,7 @@ export class AstNavigator {
   }
 
   /**
-   * Find a block by its Obsidian block ID (^block-id at end of paragraph).
+   * Find a block by its block ID (^block-id at end of paragraph).
    */
   static findBlockById(tree: Root, blockId: string): NodeLocation | null {
     const marker = `^${blockId}`;

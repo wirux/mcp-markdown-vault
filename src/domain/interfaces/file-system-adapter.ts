@@ -1,5 +1,5 @@
 /**
- * Port interface for file-system operations on an Obsidian vault.
+ * Port interface for file-system operations on a markdown vault.
  *
  * All paths are vault-relative (e.g. "daily/2024-01-01.md").
  * Implementations MUST reject paths that escape the vault root.

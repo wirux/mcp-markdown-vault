@@ -6,8 +6,8 @@ import remarkFrontmatter from "remark-frontmatter";
 import type { Root } from "mdast";
 
 /**
- * Configured unified pipeline for parsing and serializing Obsidian-flavoured
- * Markdown (GFM + YAML frontmatter).
+ * Configured unified pipeline for parsing and serializing markdown
+ * (GFM + YAML frontmatter).
  *
  * Stateless — safe to share across requests.
  */
