@@ -86,7 +86,11 @@ export class VaultIndexer {
   async indexAll(): Promise<void> {
     const files = await this.listMdFiles(this.vaultRoot);
     for (const file of files) {
-      await this.indexFile(file);
+      try {
+        await this.indexFile(file);
+      } catch {
+        // Skip files that fail to index and continue with the rest.
+      }
     }
   }
 

@@ -41,8 +41,12 @@ export class OllamaEmbeddingProvider implements IEmbeddingProvider {
         );
       }
 
-      const data = (await response.json()) as { embedding: number[] };
-      return data.embedding;
+      const data = (await response.json()) as { embeddings: number[][] };
+      const vector = data.embeddings[0];
+      if (!vector) {
+        throw new EmbeddingError("Ollama returned empty embeddings array");
+      }
+      return vector;
     } catch (err) {
       if (err instanceof EmbeddingError) throw err;
       throw new EmbeddingError(

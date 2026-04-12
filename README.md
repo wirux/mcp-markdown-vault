@@ -207,7 +207,7 @@ Fully automated via GitHub Actions and [Semantic Release](https://semantic-relea
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| **PR Check** | Pull request to `main` | Lint → Build → Test → Docker dry run (multi-arch) |
+| **PR Check** | Pull request to `main` | Lint → Build → Test |
 | **Release** | Push to `main` | Lint → Test → Semantic Release (NPM + GitHub Release) → Docker build & push to `ghcr.io` |
 
 - Versioning follows [Conventional Commits](https://www.conventionalcommits.org/) — `feat:` = minor, `fix:` = patch, `feat!:` / `BREAKING CHANGE:` = major
