@@ -10,6 +10,9 @@ permissions:
   issues: write
   pull-requests: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ── Job A: CI & Tests ──────────────────────────────────────────────
   ci:
@@ -48,6 +51,9 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Build
+        run: npm run build
 
       - name: Run semantic-release
         id: semantic
