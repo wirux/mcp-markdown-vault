@@ -10,10 +10,11 @@ beforeEach(() => {
   mockFetch.mockReset();
 });
 
+/** Mock the real Ollama /api/embed response: { embeddings: [[...]] } */
 function mockOllamaResponse(embedding: number[]): void {
   mockFetch.mockResolvedValueOnce({
     ok: true,
-    json: async () => ({ embedding }),
+    json: async () => ({ embeddings: [embedding] }),
   });
 }
 
@@ -65,6 +66,14 @@ describe("OllamaEmbeddingProvider", () => {
 
     it("throws EmbeddingError on network failure", async () => {
       mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+      await expect(provider.embed("fail")).rejects.toThrow(EmbeddingError);
+    });
+
+    it("throws EmbeddingError when embeddings array is empty", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ embeddings: [] }),
+      });
       await expect(provider.embed("fail")).rejects.toThrow(EmbeddingError);
     });
   });

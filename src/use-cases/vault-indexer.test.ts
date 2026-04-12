@@ -139,6 +139,35 @@ describe("VaultIndexer", () => {
       expect(await store.has("root.md")).toBe(true);
       expect(await store.has("sub/nested.md")).toBe(true);
     });
+
+    it("skips files that fail to embed and continues indexing", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "good.md"),
+        "# Good\n\nGood content.\n",
+      );
+      await fs.writeFile(
+        path.join(tmpDir, "bad.md"),
+        "# Bad\n\nWill fail to embed.\n",
+      );
+      await fs.writeFile(
+        path.join(tmpDir, "also-good.md"),
+        "# Also Good\n\nMore good content.\n",
+      );
+
+      const origEmbed = embedder.embed.bind(embedder);
+      embedder.embed = async (text: string) => {
+        if (text.includes("Will fail")) {
+          throw new Error("Embedding service unavailable");
+        }
+        return origEmbed(text);
+      };
+
+      await indexer.indexAll();
+
+      expect(await store.has("good.md")).toBe(true);
+      expect(await store.has("also-good.md")).toBe(true);
+      expect(await store.has("bad.md")).toBe(false);
+    });
   });
 
   describe("offline queue", () => {
