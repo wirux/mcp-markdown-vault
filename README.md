@@ -2,9 +2,9 @@
 
 # 📁 Markdown Vault MCP Server
 
-**A headless, semantic [MCP](https://modelcontextprotocol.io/) server for any markdown-based knowledge base**
+**Headless semantic [MCP](https://modelcontextprotocol.io/) server for Obsidian, Logseq, Dendron, Foam, and any folder of markdown files.**
 
-Works with Obsidian, Logseq, Dendron, Foam, or any folder of markdown files — no specific app required.
+`npm install` and point it at a folder. Hybrid search, AST editing, zero-config embeddings. No app, no plugins, no API keys.
 
 <!-- Note: Badge URLs reference the current GitHub repo (Wirux/mcp-obsidian). -->
 <!-- Update these if/when the repo is renamed to mcp-markdown-vault. -->
@@ -21,17 +21,23 @@ Works with Obsidian, Logseq, Dendron, Foam, or any folder of markdown files — 
 
 ---
 
-## 🗂️ Works With
+## 💡 Why this server?
 
-| | Tool | Support |
+> **TL;DR** — One `npx` command. No running app. No plugins. No vector DB. Semantic search works out of the box.
+
+| | Differentiator | Details |
 |---|---|---|
-| 💎 | **[Obsidian](https://obsidian.md/)** | Full support — wikilinks, block IDs, YAML frontmatter |
-| 📓 | **[Logseq](https://logseq.com/)** | Markdown files with heading-based structure |
-| 🌳 | **[Dendron](https://www.dendron.so/)** | Hierarchical markdown notes |
-| 🫧 | **[Foam](https://foambubble.github.io/foam/)** | VS Code markdown knowledge base |
-| 📂 | **Any markdown folder** | Plain `.md` files in any directory structure |
+| 🚫 | **No app or plugins required** | Most Obsidian MCP servers ([mcp-obsidian](https://github.com/MarkusPfundstein/mcp-obsidian), [obsidian-mcp-server](https://github.com/cyanheads/obsidian-mcp-server)) need Obsidian running with the Local REST API plugin. This server reads and writes `.md` files directly — point it at a folder and go. |
+| 🧠 | **Built-in semantic search, zero setup** | Hybrid search: cosine-similarity vectors + TF-IDF + word proximity. Local embeddings (`@huggingface/transformers`, `all-MiniLM-L6-v2`, 384d) download on first run. No API keys, no external services. Ollama optional for higher quality. |
+| 🔬 | **Surgical AST-based editing** | `remark` AST pipeline patches specific headings or block IDs without touching the rest of the file. Freeform line-range & string replace as fallback. Levenshtein fuzzy matching handles LLM typos. |
+| 🔓 | **Tool-agnostic** | Obsidian vaults, Logseq graphs, Dendron workspaces, Foam, or any plain folder of `.md` files. If it's markdown, it works. |
+| 📦 | **Single package, no infrastructure** | Unlike Python alternatives that need ChromaDB or other vector stores, everything runs in one Node.js process. `npx @wirux/mcp-markdown-vault` and you're running. Docker image available. |
 
-> The server operates directly on your markdown files. No plugins, no sync, no app dependency.
+<div align="center">
+
+💎 **Obsidian** · 📓 **Logseq** · 🌳 **Dendron** · 🫧 **Foam** · 📂 **Any `.md` folder**
+
+</div>
 
 ---
 
