@@ -8,7 +8,10 @@
       "Bash(find /Users/adamwilczek/Documents/playground/obsidian_mcp/dist -name *.test.*)",
       "Bash(docker --version)",
       "Bash(docker info:*)",
-      "Bash(docker build:*)"
+      "Bash(docker build:*)",
+      "Bash(docker run:*)",
+      "Bash(docker rm:*)",
+      "Bash(docker compose:*)"
     ]
   }
 }

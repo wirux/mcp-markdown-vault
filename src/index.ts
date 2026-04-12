@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { LocalFileSystemAdapter } from "./infrastructure/local-fs-adapter.js";
 import { InMemoryVectorStore } from "./infrastructure/in-memory-vector-store.js";
 import { OllamaEmbeddingProvider } from "./infrastructure/ollama-embedding.js";
@@ -9,6 +8,10 @@ import type { IEmbeddingProvider } from "./domain/interfaces/index.js";
 import { WorkflowStateMachine } from "./use-cases/workflow-state.js";
 import { VaultIndexer } from "./use-cases/vault-indexer.js";
 import { createMcpServer } from "./presentation/mcp-tools.js";
+import {
+  parseTransportType,
+  startTransport,
+} from "./presentation/transport.js";
 
 /**
  * Strategy: pick the embedding provider based on environment.
@@ -27,9 +30,12 @@ async function createEmbeddingProvider(): Promise<IEmbeddingProvider> {
     );
 
     try {
-      const response = await fetch(`${ollamaUrl.replace(/\/+$/, "")}/api/tags`, {
-        signal: AbortSignal.timeout(3000),
-      });
+      const response = await fetch(
+        `${ollamaUrl.replace(/\/+$/, "")}/api/tags`,
+        {
+          signal: AbortSignal.timeout(3000),
+        },
+      );
       if (response.ok) {
         console.error(`Embedding provider: Ollama (${ollamaUrl})`);
         return new OllamaEmbeddingProvider({
@@ -54,21 +60,28 @@ async function createEmbeddingProvider(): Promise<IEmbeddingProvider> {
 
 async function main(): Promise<void> {
   const vaultRoot = process.env["VAULT_PATH"] ?? "/vault";
+  const transportType = parseTransportType(
+    process.env["MCP_TRANSPORT_TYPE"],
+  );
+  const port = parseInt(process.env["PORT"] ?? "3000", 10);
 
+  // Shared dependencies (reused across all client connections)
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
   const vectorStore = new InMemoryVectorStore();
   const embedder = await createEmbeddingProvider();
-  const workflow = new WorkflowStateMachine();
 
-  const server = createMcpServer({
-    fsAdapter,
-    vectorStore,
-    embedder,
-    workflow,
-    vaultRoot,
-  });
+  // Server factory: each connection gets its own McpServer + WorkflowStateMachine.
+  // Shared deps (fs, vectors, embedder) are captured by closure.
+  const serverFactory = () =>
+    createMcpServer({
+      fsAdapter,
+      vectorStore,
+      embedder,
+      workflow: new WorkflowStateMachine(),
+      vaultRoot,
+    });
 
-  // Start background indexing
+  // Start background indexing (shared across all connections)
   const indexer = new VaultIndexer(vaultRoot, vectorStore, embedder);
   indexer
     .indexAll()
@@ -81,14 +94,16 @@ async function main(): Promise<void> {
       console.error("Watcher failed to start:", err),
     );
 
-  // Connect via stdio
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  // Connect via selected transport
+  console.error(`Transport: ${transportType}`);
+  const handle = await startTransport(transportType, serverFactory, {
+    port,
+  });
 
   // Handle shutdown
   process.on("SIGINT", async () => {
     await indexer.stop();
-    await server.close();
+    await handle.shutdown();
     process.exit(0);
   });
 }

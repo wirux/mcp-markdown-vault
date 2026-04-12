@@ -262,3 +262,37 @@ All notable changes to the Obsidian Semantic MCP Server are documented here.
 ### Test Results
 - **239 tests across 19 files — all passing**
 - Clean TypeScript compilation with strict mode
+
+---
+
+## Phase 9 — Dual Transport (Stdio & SSE)
+
+### Added
+- `TransportType`, `parseTransportType()`, `createSseApp()`, `startTransport()` (`src/presentation/transport.ts`)
+  - `parseTransportType` validates `MCP_TRANSPORT_TYPE` env var (`stdio` | `sse`)
+  - `createSseApp` creates an Express app with CORS, `GET /sse` (SSE stream), and `POST /messages` (JSON-RPC routing by sessionId)
+  - `startTransport` orchestrates either stdio or SSE startup and returns a `TransportHandle` for graceful shutdown
+  - Each SSE client gets its own `McpServer` + `WorkflowStateMachine` via server factory pattern
+  - Shared dependencies (fsAdapter, vectorStore, embedder) are reused across connections
+- Updated `src/index.ts` composition root
+  - Server factory pattern: creates per-connection McpServer with shared deps + fresh WorkflowStateMachine
+  - `MCP_TRANSPORT_TYPE` and `PORT` env vars
+  - Graceful shutdown closes HTTP server and all active SSE sessions
+- 10 unit tests for transport layer (parseTransportType validation, SSE Express routes, session lifecycle, CORS, multi-client isolation)
+
+### Configuration Matrix (all 4 combinations supported)
+| Transport | Embeddings | Status |
+|---|---|---|
+| stdio + Local (Transformers.js) | Default, zero-setup | Supported |
+| stdio + Ollama | Set `OLLAMA_URL` | Supported |
+| sse + Local (Transformers.js) | Set `MCP_TRANSPORT_TYPE=sse` | Supported |
+| sse + Ollama | Set both `MCP_TRANSPORT_TYPE=sse` and `OLLAMA_URL` | Supported |
+
+### Dependencies Added
+- `express` — HTTP server for SSE transport
+- `cors` — CORS middleware
+- `@types/express`, `@types/cors` (dev)
+
+### Test Results
+- **249 tests across 20 files — all passing**
+- Clean TypeScript compilation with strict mode

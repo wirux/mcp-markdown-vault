@@ -1,4 +1,6 @@
 # ── Stage 1: Build ──────────────────────────────────────────────────
+# Using slim (Debian/glibc) instead of Alpine (musl) because
+# onnxruntime-node (used by @huggingface/transformers) requires glibc.
 FROM node:22-slim AS builder
 
 WORKDIR /app
@@ -21,7 +23,7 @@ FROM node:22-slim AS production
 WORKDIR /app
 
 # Non-root user for security
-# RUN addgroup -S mcp && adduser -S mcp -G mcp
+RUN groupadd --system mcp && useradd --system --gid mcp mcp
 
 # Copy compiled output and production deps
 COPY --from=builder /app/dist ./dist
@@ -33,10 +35,16 @@ RUN mkdir -p /vault && chown mcp:mcp /vault
 
 # Environment defaults
 ENV NODE_ENV=production
-# ENV VAULT_PATH=/vault
-# ENV OLLAMA_URL=http://host.docker.internal:11434
-# ENV OLLAMA_MODEL=nomic-embed-text
-# ENV OLLAMA_DIMENSIONS=768
+ENV VAULT_PATH=/vault
+# OLLAMA_URL intentionally unset — local embeddings by default (zero-setup).
+# Set OLLAMA_URL at runtime to enable Ollama.
+ENV OLLAMA_MODEL=nomic-embed-text
+ENV OLLAMA_DIMENSIONS=768
+ENV MCP_TRANSPORT_TYPE=stdio
+ENV PORT=3000
+
+# Expose SSE port (used when MCP_TRANSPORT_TYPE=sse)
+EXPOSE 3000
 
 USER mcp
 

@@ -10,6 +10,7 @@ A standalone, Dockerized [Model Context Protocol](https://modelcontextprotocol.i
 - **Semantic search** — Hybrid search combining vector similarity with lexical TF-IDF scoring; background auto-indexing watches for file changes
 - **Zero-setup embeddings** — Built-in local embeddings via `@huggingface/transformers` with automatic Ollama fallback — no external services required
 - **Workflow tracking** — Petri net state machine (IDLE → EXPLORING → EDITING → REVIEWING) with contextual hints guiding the LLM's next steps
+- **Dual transport** — Stdio (default, single client) or SSE over HTTP (multi-client, Docker-friendly)
 - **Typo resilience** — Levenshtein-based fuzzy matching makes edit operations robust against LLM typos
 
 ## 5 MCP Tools
@@ -74,6 +75,25 @@ Add to your MCP client config (e.g. Claude Desktop):
 }
 ```
 
+## Transport Modes
+
+| `MCP_TRANSPORT_TYPE` | Use case | How it works |
+|---|---|---|
+| `stdio` (default) | Single-client desktop apps (Claude Desktop) | Reads/writes stdin/stdout; 1:1 connection |
+| `sse` | Multi-client setups (Claude Code + OpenCode via Docker) | HTTP server with SSE streams; one connection per client |
+
+**Stdio** is the default and requires no extra config. **SSE** starts an HTTP server on `PORT` (default 3000) with:
+
+- `GET /sse` — establishes an SSE stream (one per client)
+- `POST /messages?sessionId=...` — receives JSON-RPC messages
+
+```bash
+# Start in SSE mode
+MCP_TRANSPORT_TYPE=sse PORT=3000 VAULT_PATH=/path/to/vault node dist/index.js
+```
+
+Each SSE client gets its own workflow state. Shared resources (vault, vector index, embedder) are reused across all connections.
+
 ## Embedding Providers
 
 The server selects an embedding provider automatically:
@@ -91,6 +111,8 @@ No configuration is needed for the local provider — it downloads the model on 
 | Environment Variable | Default | Description |
 |---|---|---|
 | `VAULT_PATH` | `/vault` | Path to the Obsidian vault directory |
+| `MCP_TRANSPORT_TYPE` | `stdio` | Transport: `stdio` (single client) or `sse` (multi-client HTTP) |
+| `PORT` | `3000` | HTTP port for SSE transport |
 | `OLLAMA_URL` | *(unset)* | Ollama REST API base URL — set to enable Ollama |
 | `OLLAMA_MODEL` | `nomic-embed-text` | Ollama embedding model name |
 | `OLLAMA_DIMENSIONS` | `768` | Ollama embedding vector dimensionality |
@@ -104,14 +126,14 @@ src/
   domain/           Errors, interfaces (ports), value objects
   use-cases/         Business logic (AST, chunking, search, workflow)
   infrastructure/    Adapters (file system, Ollama, vector store)
-  presentation/      MCP tool bindings
+  presentation/      MCP tool bindings, transport layer (stdio/SSE)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation and [CHANGELOG.md](CHANGELOG.md) for implementation history.
 
 ## Testing
 
-239 tests across 19 files, written test-first (TDD).
+249 tests across 20 files, written test-first (TDD).
 
 ```bash
 # Run all tests
