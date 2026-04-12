@@ -1,6 +1,6 @@
 {
   "name": "@wirux/mcp-obsidian",
-  "version": "0.0.0-development",
+  "version": "1.0.2",
   "description": "Standalone semantic MCP server for Obsidian vaults",
   "type": "module",
   "publishConfig": {
@@ -13,9 +13,6 @@
   "files": [
     "dist"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "tsc",
     "lint": "tsc --noEmit",
