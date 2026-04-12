@@ -33,6 +33,13 @@ COPY --from=builder /app/package.json ./
 # Default vault mount point
 RUN mkdir -p /vault && chown mcp:mcp /vault
 
+# Writable caches for @huggingface/transformers (non-root user):
+#   - /home/mcp/.cache/huggingface — model file cache (controlled by HF_HOME)
+#   - .../transformers/.cache     — internal HTTP response cache (hardcoded in library)
+RUN mkdir -p /home/mcp/.cache/huggingface \
+    /app/node_modules/@huggingface/transformers/.cache && \
+    chown -R mcp:mcp /home/mcp /app/node_modules/@huggingface/transformers/.cache
+
 # Environment defaults
 ENV NODE_ENV=production
 ENV VAULT_PATH=/vault
@@ -42,6 +49,7 @@ ENV OLLAMA_MODEL=nomic-embed-text
 ENV OLLAMA_DIMENSIONS=768
 ENV MCP_TRANSPORT_TYPE=stdio
 ENV PORT=3000
+ENV HF_HOME=/home/mcp/.cache/huggingface
 
 # Expose SSE port (used when MCP_TRANSPORT_TYPE=sse)
 EXPOSE 3000
