@@ -7,8 +7,9 @@
 Semantic search, surgical editing, and workflow tracking — no Obsidian app required.
 
 [![CI / Release](https://github.com/Wirux/mcp-obsidian/actions/workflows/release.yml/badge.svg)](https://github.com/Wirux/mcp-obsidian/actions/workflows/release.yml)
-[![npm version](https://img.shields.io/npm/v/obsidian-semantic-mcp?color=cb3837&logo=npm)](https://www.npmjs.com/package/obsidian-semantic-mcp)
-[![Docker](https://img.shields.io/badge/ghcr.io-obsidian--mcp-blue?logo=docker)](https://ghcr.io/wirux/mcp-obsidian)
+[![PR Check](https://github.com/Wirux/mcp-obsidian/actions/workflows/pr-check.yml/badge.svg)](https://github.com/Wirux/mcp-obsidian/actions/workflows/pr-check.yml)
+[![npm version](https://img.shields.io/npm/v/@wirux/mcp-obsidian?color=cb3837&logo=npm)](https://www.npmjs.com/package/@wirux/mcp-obsidian)
+[![Docker](https://img.shields.io/badge/ghcr.io-mcp--obsidian-blue?logo=docker)](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-obsidian)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
@@ -55,43 +56,62 @@ Semantic search, surgical editing, and workflow tracking — no Obsidian app req
 - [Node.js](https://nodejs.org/) >= 22
 - *(Optional)* [Ollama](https://ollama.com/) for higher-quality embeddings
 
-### 📦 Install & Run
+### 📦 Install from NPM
 
 ```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Start the server
-VAULT_PATH=/path/to/your/vault node dist/index.js
+npm install -g @wirux/mcp-obsidian
 ```
 
-### 🐳 Docker
+Then run directly:
 
 ```bash
-docker compose up --build
+VAULT_PATH=/path/to/your/vault obsidian-semantic-mcp
 ```
-
-Edit `docker-compose.yml` to point at your Obsidian vault directory.
 
 ### 🔌 MCP Client Configuration
 
-Add to your MCP client config (e.g. Claude Desktop):
+Add to your MCP client config (e.g. Claude Desktop, Claude Code):
 
 ```json
 {
   "mcpServers": {
     "obsidian": {
-      "command": "node",
-      "args": ["/path/to/obsidian-semantic-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@wirux/mcp-obsidian"],
       "env": {
         "VAULT_PATH": "/path/to/your/vault"
       }
     }
   }
 }
+```
+
+> `npx -y` auto-installs the package if not already present — no global install needed.
+
+### 🐳 Docker
+
+Pull the pre-built multi-arch image from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/wirux/mcp-obsidian:latest
+```
+
+Or use Docker Compose:
+
+```bash
+docker compose up
+```
+
+Edit `docker-compose.yml` to point at your Obsidian vault directory. The default compose file uses SSE transport on port 3000.
+
+### 🛠️ Development (from source)
+
+```bash
+git clone https://github.com/Wirux/mcp-obsidian.git
+cd mcp-obsidian
+npm install
+npm run build
+VAULT_PATH=/path/to/your/vault node dist/index.js
 ```
 
 ---
@@ -109,7 +129,7 @@ Add to your MCP client config (e.g. Claude Desktop):
 - `POST /messages?sessionId=...` — receives JSON-RPC messages
 
 ```bash
-MCP_TRANSPORT_TYPE=sse PORT=3000 VAULT_PATH=/path/to/vault node dist/index.js
+MCP_TRANSPORT_TYPE=sse PORT=3000 VAULT_PATH=/path/to/vault npx @wirux/mcp-obsidian
 ```
 
 Each SSE client gets its own workflow state. Shared resources (vault, vector index, embedder) are reused across all connections.
@@ -156,6 +176,22 @@ src/
 ```
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture docs and [CHANGELOG.md](CHANGELOG.md) for implementation history.
+
+---
+
+## 🚢 CI/CD & Release
+
+Fully automated via GitHub Actions and [Semantic Release](https://semantic-release.gitbook.io/):
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| **PR Check** | Pull request to `main` | Lint → Build → Test → Docker dry run (multi-arch) |
+| **Release** | Push to `main` | Lint → Test → Semantic Release (NPM + GitHub Release) → Docker build & push to `ghcr.io` |
+
+- Versioning follows [Conventional Commits](https://www.conventionalcommits.org/) — `feat:` = minor, `fix:` = patch, `feat!:` / `BREAKING CHANGE:` = major
+- Docker images are built for `linux/amd64` and `linux/arm64` via QEMU
+- NPM package published as [`@wirux/mcp-obsidian`](https://www.npmjs.com/package/@wirux/mcp-obsidian)
+- Docker image available at [`ghcr.io/wirux/mcp-obsidian`](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-obsidian)
 
 ---
 

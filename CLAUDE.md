@@ -13,22 +13,22 @@ Standalone, Dockerized TypeScript MCP (Model Context Protocol) server for Obsidi
 npm install
 
 # Build (compiles to dist/, excludes test files)
-npx tsc
+npm run build
 
 # Run all tests (277 tests across 22 files)
-npx vitest run
+npm test
 
 # Run a single test file
 npx vitest run src/domain/errors/domain-errors.test.ts
 
 # Run tests in watch mode
-npx vitest
+npm run test:watch
 
-# Type-check without emitting
-npx tsc --noEmit
+# Lint (type-check without emitting)
+npm run lint
 
-# Docker
-docker compose up --build
+# Docker (uses pre-built image from ghcr.io)
+docker compose up
 ```
 
 ## Architecture
@@ -96,3 +96,12 @@ All file operations route through `SafePath` value object — prevents path trav
 - Use real temp directories for file system tests — no mocks
 - Use `InMemoryTransport` from `@modelcontextprotocol/sdk` for MCP integration tests
 - All file paths in tests must go through `SafePath`
+
+### CI/CD & Release
+
+- **Semantic Release** via `.releaserc.json` — version bumps from [Conventional Commits](https://www.conventionalcommits.org/) (`feat:` = minor, `fix:` = patch, `feat!:` = major)
+- **NPM:** published as `@wirux/mcp-obsidian` (scoped, public)
+- **Docker:** multi-arch images (`linux/amd64` + `linux/arm64`) pushed to `ghcr.io/wirux/mcp-obsidian`
+- **PR Check** (`.github/workflows/pr-check.yml`): lint → build → test → Docker dry run on every PR to `main`
+- **Release** (`.github/workflows/release.yml`): lint → test → semantic-release → Docker build & push on push to `main`
+- `docker-compose.yml` uses the pre-built `ghcr.io/wirux/mcp-obsidian:latest` image (not local build)

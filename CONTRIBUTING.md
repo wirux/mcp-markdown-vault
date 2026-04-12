@@ -5,8 +5,8 @@ Thank you for considering contributing to the Obsidian Semantic MCP Server.
 ## Development Setup
 
 ```bash
-git clone <repo-url>
-cd obsidian-semantic-mcp
+git clone https://github.com/Wirux/mcp-obsidian.git
+cd mcp-obsidian
 npm install
 npm test
 ```
@@ -19,8 +19,9 @@ Requires Node.js >= 22.
 2. Write tests first (TDD). Place test files next to the module they test: `foo.ts` → `foo.test.ts`.
 3. Implement the feature or fix.
 4. Ensure all tests pass: `npm test`
-5. Ensure TypeScript compiles cleanly: `npx tsc --noEmit`
+5. Ensure TypeScript compiles cleanly: `npm run lint`
 6. Open a pull request against `main`.
+7. PR Check CI will run automatically (lint → build → test → Docker dry run).
 
 ## Code Guidelines
 
@@ -62,7 +63,7 @@ This project follows Clean Architecture. Respect the layer boundaries:
 
 - Keep PRs focused on a single concern
 - Include test coverage for new functionality
-- Update `CHANGELOG.md` if your change is user-facing
+- Use [Conventional Commits](https://www.conventionalcommits.org/) — versioning is automated via semantic-release
 - Ensure CI passes before requesting review
 
 ## Reporting Issues

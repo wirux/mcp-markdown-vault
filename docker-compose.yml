@@ -1,6 +1,6 @@
 services:
   mcp-server:
-    build: .
+    image: ghcr.io/wirux/mcp-obsidian:latest
     volumes:
       # Mount your Obsidian vault (read-write)
       - ./my-vault:/vault:rw

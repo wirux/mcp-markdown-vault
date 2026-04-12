@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---|---|
-| 0.1.x | Yes |
+| 1.x | Yes |
 
 ## Reporting a Vulnerability
 
@@ -40,7 +40,7 @@ The `LocalFileSystemAdapter` writes to a temporary file first, then renames it t
 ### Docker Security
 - The production Docker image runs as a non-root user (`mcp`)
 - The vault is mounted as a volume, isolating it from the container filesystem
-- The Alpine base image has a minimal attack surface
+- The Debian slim base image has a minimal attack surface
 
 ### Input Validation
 All MCP tool inputs are validated with Zod schemas before processing.
