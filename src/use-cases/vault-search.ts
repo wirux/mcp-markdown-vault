@@ -12,6 +12,8 @@ export interface VaultSearchResult {
 export interface VaultSearchOptions {
   /** Maximum results to return. Default: 20. */
   maxResults?: number | undefined;
+  /** Optional directory prefix to scope the search. */
+  directory?: string | undefined;
 }
 
 /**
@@ -35,7 +37,7 @@ export class VaultSearcher {
     options?: VaultSearchOptions,
   ): Promise<VaultSearchResult[]> {
     const maxResults = options?.maxResults ?? 20;
-    const files = await this.fsAdapter.listNotes();
+    const files = await this.fsAdapter.listNotes(options?.directory);
 
     const allResults: VaultSearchResult[] = [];
 

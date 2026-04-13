@@ -15,7 +15,7 @@ npm install
 # Build (compiles to dist/, excludes test files)
 npm run build
 
-# Run all tests (296 tests across 25 files)
+# Run all tests (300 tests across 25 files)
 npm test
 
 # Run a single test file
@@ -46,12 +46,12 @@ Entry point: `src/index.ts` — composition root, reads env vars, wires dependen
 
 - **AST Parser** (`markdown-pipeline.ts`, `ast-navigation.ts`, `ast-patcher.ts`): unified pipeline (remark-parse + remark-gfm + remark-frontmatter) for surgical markdown patching (append/prepend/replace by heading or block ID)
 - **Fragment Retrieval** (`chunker.ts`, `scoring.ts`, `fragment-retrieval.ts`): heading-aware markdown chunking with TF-IDF + word proximity scoring
-- **Semantic Search** (`hybrid-search.ts`, `vault-indexer.ts`): hybrid search combining vector similarity with lexical TF-IDF; background auto-vectorization via chokidar file watcher with debounce
+- **Semantic Search** (`hybrid-search.ts`, `vault-indexer.ts`): hybrid search combining vector similarity with lexical TF-IDF; background auto-vectorization via chokidar file watcher with debounce; supports optional directory scoping via post-filter
 - **Embedding Strategy** (`index.ts`): auto-selects provider — local `TransformersEmbeddingProvider` (zero-setup) or `OllamaEmbeddingProvider` when `OLLAMA_URL` is set and reachable
 - **Workflow** (`workflow-state.ts`, `hints.ts`): Petri net state machine (IDLE → EXPLORING → EDITING → REVIEWING); contextual hints appended to all tool responses
 - **Fuzzy Matching** (`fuzzy-match.ts`): Levenshtein-based typo resilience for edit operations
 - **Transport** (`transport.ts`): dual transport — stdio (default, single client) or SSE over HTTP (multi-client); each SSE connection gets its own McpServer + WorkflowStateMachine while sharing fs/vector/embedder deps
-- **Vault Search** (`vault-search.ts`): cross-vault lexical keyword search using FragmentRetriever — no embeddings required
+- **Vault Search** (`vault-search.ts`): cross-vault lexical keyword search using FragmentRetriever — no embeddings required; supports optional directory scoping
 - **Freeform Editor** (`freeform-editor.ts`): line-range replacement and literal string find/replace as fallback for non-AST content
 - **Read by Heading** (`read-by-heading.ts`): AST-based section extraction — reads content under a specific heading (up to next same-or-higher-level heading) to save context window space
 - **Frontmatter Management** (`frontmatter.ts`): safe read/update of YAML frontmatter via AST + `js-yaml` — merge fields without touching markdown body; `InvalidFrontmatterPayloadError` for malformed JSON input

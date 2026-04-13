@@ -23,12 +23,14 @@ export interface HybridSearchOptions {
   k?: number;
   /** Weight for vector similarity vs lexical (0 = lexical only, 1 = vector only). Default: 0.6. */
   vectorWeight?: number;
+  /** Optional directory prefix to scope the search. */
+  directory?: string | undefined;
 }
 
-const DEFAULTS: Required<HybridSearchOptions> = {
+const DEFAULTS = {
   k: 10,
   vectorWeight: 0.6,
-};
+} as const;
 
 /**
  * Hybrid search combining vector similarity with lexical TF-IDF scoring.
@@ -52,7 +54,15 @@ export class HybridSearcher {
     // 1. Vector search — retrieve broader candidate set
     const candidateK = Math.max(opts.k * 3, 20);
     const queryVector = await this.embedder.embed(query);
-    const vectorResults = await this.store.search(queryVector, candidateK);
+    let vectorResults = await this.store.search(queryVector, candidateK);
+
+    // 1b. Post-filter by directory prefix if provided
+    if (opts.directory) {
+      const prefix = opts.directory;
+      vectorResults = vectorResults.filter((r) =>
+        r.docPath.startsWith(prefix),
+      );
+    }
 
     if (vectorResults.length === 0) return [];
 

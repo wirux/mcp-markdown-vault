@@ -15,7 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-296%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-300%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
 
 </div>
 
@@ -49,6 +49,7 @@
 | 📑 | **Read by heading** | Read a single section by heading title — returns only content under that heading (up to the next same-level heading), saving context window space |
 | 🔬 | **Surgical editing** | AST-based patching targets specific headings or block IDs — never overwrites the whole file |
 | 🔍 | **Fragment retrieval** | Heading-aware chunking + TF-IDF + proximity scoring returns only relevant sections |
+| 📂 | **Scoped search** | Optional directory filter for `global_search` and `semantic_search` — restrict results to specific folders to reduce noise |
 | 🧠 | **Semantic search** | Hybrid vector + lexical search with background auto-indexing |
 | ⚡ | **Zero-setup embeddings** | Built-in local embeddings via `@huggingface/transformers` — Ollama optional |
 | 🔄 | **Workflow tracking** | Petri net state machine with contextual LLM hints |
@@ -221,7 +222,7 @@ Fully automated via GitHub Actions and [Semantic Release](https://semantic-relea
 
 ## 🧪 Testing
 
-**296 tests** across 25 files, written test-first (TDD).
+**300 tests** across 25 files, written test-first (TDD).
 
 ```bash
 npm test                                          # Run all tests
