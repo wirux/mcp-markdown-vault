@@ -8,3 +8,4 @@ export type {
 } from "./vector-store.js";
 export type { IMarkdownRepository } from "./markdown-repository.js";
 export type { IDiffService } from "./diff-service.js";
+export type { ITemplateEngine } from "./template-engine.js";

@@ -15,7 +15,7 @@ npm install
 # Build (compiles to dist/, excludes test files)
 npm run build
 
-# Run all tests (310 tests across 29 files)
+# Run all tests (318 tests across 31 files)
 npm test
 
 # Run a single test file
@@ -35,9 +35,9 @@ docker compose up
 
 Clean Architecture with four layers:
 
-- **`src/domain/`** — Domain errors, port interfaces (`IFileSystemAdapter`, `IEmbeddingProvider`, `IVectorStore`, `IMarkdownRepository`, `IDiffService`), value objects (`SafePath`)
-- **`src/use-cases/`** — Business logic: AST parsing/patching, chunking, scoring, retrieval, hybrid search, read-by-heading, bulk-read, frontmatter management, update-file, dry-run edit, workflow state, hints, fuzzy matching, wikilink resolution, vault indexing
-- **`src/infrastructure/`** — Adapters: `LocalFileSystemAdapter` (fs/promises), `OllamaEmbeddingProvider` (REST), `TransformersEmbeddingProvider` (local `@huggingface/transformers`), `InMemoryVectorStore` (cosine similarity), `MarkdownFileRepository` (AST + frontmatter from file), `UnifiedDiffService` (unified diff via `diff` package)
+- **`src/domain/`** — Domain errors, port interfaces (`IFileSystemAdapter`, `IEmbeddingProvider`, `IVectorStore`, `IMarkdownRepository`, `IDiffService`, `ITemplateEngine`), value objects (`SafePath`)
+- **`src/use-cases/`** — Business logic: AST parsing/patching, chunking, scoring, retrieval, hybrid search, read-by-heading, bulk-read, frontmatter management, update-file, dry-run edit, create-from-template, workflow state, hints, fuzzy matching, wikilink resolution, vault indexing
+- **`src/infrastructure/`** — Adapters: `LocalFileSystemAdapter` (fs/promises), `OllamaEmbeddingProvider` (REST), `TransformersEmbeddingProvider` (local `@huggingface/transformers`), `InMemoryVectorStore` (cosine similarity), `MarkdownFileRepository` (AST + frontmatter from file), `UnifiedDiffService` (unified diff via `diff` package), `RegexTemplateEngine` (`{{key}}` placeholder replacement)
 - **`src/presentation/`** — 5 MCP tool bindings (`createMcpServer()`), transport layer (`transport.ts`: stdio/SSE selection, Express SSE app)
 
 Entry point: `src/index.ts` — composition root, reads env vars, wires dependencies, selects transport.
@@ -58,7 +58,8 @@ Entry point: `src/index.ts` — composition root, reads env vars, wires dependen
 - **Update File** (`update-file.ts`): full content replacement with upsert semantics (create or overwrite)
 - **Dry-Run Edit** (`dry-run-edit.ts`): coordinates edit preview vs commit — when `dryRun=true`, returns unified diff via `IDiffService` without writing; when false, writes to disk
 - **Bulk Read** (`bulk-read.ts`): reads multiple files/heading-scoped sections concurrently in a single call with per-item fault tolerance — reuses `IFileSystemAdapter` and `ReadByHeadingUseCase`
-- **5 MCP Tools**: vault (CRUD + update), edit (AST patching + freeform line_replace/string_replace + frontmatter_set + dryRun diff preview), view (fragment retrieval + global_search + semantic_search + outline + read by heading + frontmatter_get + bulk_read), workflow (state transitions), system (status)
+- **Templating** (`create-from-template.ts`, `regex-template-engine.ts`): creates new notes from template files with `{{variable}}` placeholder injection via `ITemplateEngine`; refuses to overwrite existing destination files (`NoteAlreadyExistsError`)
+- **5 MCP Tools**: vault (CRUD + update + create_from_template), edit (AST patching + freeform line_replace/string_replace + frontmatter_set + dryRun diff preview), view (fragment retrieval + global_search + semantic_search + outline + read by heading + frontmatter_get + bulk_read), workflow (state transitions), system (status)
 
 ### Security
 

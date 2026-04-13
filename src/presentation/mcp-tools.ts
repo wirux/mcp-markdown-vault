@@ -17,7 +17,9 @@ import { BulkReadUseCase } from "../use-cases/bulk-read.js";
 import { GetFrontmatterUseCase, SetFrontmatterUseCase } from "../use-cases/frontmatter.js";
 import { UpdateFileUseCase } from "../use-cases/update-file.js";
 import { DryRunEditor } from "../use-cases/dry-run-edit.js";
+import { CreateFromTemplateUseCase } from "../use-cases/create-from-template.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
+import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
 import { DomainError } from "../domain/errors/index.js";
 
@@ -46,14 +48,16 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("vault", {
     title: "Vault",
     description:
-      "Manage vault notes: list, read, create, update, delete, stat. Operates on .md files in the markdown vault.",
+      "Manage vault notes: list, read, create, update, delete, stat, create_from_template. Operates on .md files in the markdown vault.",
     inputSchema: {
-      action: z.enum(["list", "read", "create", "update", "delete", "stat"]),
+      action: z.enum(["list", "read", "create", "update", "delete", "stat", "create_from_template"]),
       path: z.string().optional(),
       directory: z.string().optional(),
       content: z.string().optional(),
+      templatePath: z.string().optional().describe("Source template file path (for create_from_template)."),
+      variables: z.record(z.string(), z.string()).optional().describe("Key-value variables to inject into template placeholders (for create_from_template)."),
     },
-  }, async ({ action, path, directory, content }) => {
+  }, async ({ action, path, directory, content, templatePath, variables }) => {
     return wrapTool(deps.workflow, "vault", async () => {
       switch (action) {
         case "list": {
@@ -87,6 +91,18 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           if (!path) throw new Error("path is required for stat");
           const stat = await deps.fsAdapter.stat(path);
           return stat;
+        }
+        case "create_from_template": {
+          if (!path) throw new Error("path is required for create_from_template");
+          if (!templatePath) throw new Error("templatePath is required for create_from_template");
+          const engine = new RegexTemplateEngine();
+          const useCase = new CreateFromTemplateUseCase(deps.fsAdapter, engine);
+          const result = await useCase.execute({
+            templatePath,
+            destinationPath: path,
+            variables,
+          });
+          return result.message;
         }
         default:
           throw new Error(`Unknown vault action: ${String(action)}`);
