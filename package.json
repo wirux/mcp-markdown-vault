@@ -6,6 +6,10 @@
   "publishConfig": {
     "access": "public"
   },
+  "repository": {
+      "type": "git",
+      "url": "git+https://github.com/wirux/mcp-markdown-vault.git"
+    },
   "main": "dist/index.js",
   "bin": {
     "markdown-vault-mcp": "dist/index.js"
