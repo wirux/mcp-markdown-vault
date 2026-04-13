@@ -101,6 +101,18 @@ export class VectorDbError extends DomainError {
   }
 }
 
+// ── Frontmatter errors ────────────────────────────────────────────
+
+export class InvalidFrontmatterPayloadError extends DomainError {
+  constructor(detail: string) {
+    super(
+      "INVALID_FRONTMATTER_PAYLOAD",
+      `Invalid frontmatter payload: ${detail}`,
+    );
+    this.name = "InvalidFrontmatterPayloadError";
+  }
+}
+
 // ── Workflow / State errors ────────────────────────────────────────
 
 export class StateTransitionError extends DomainError {

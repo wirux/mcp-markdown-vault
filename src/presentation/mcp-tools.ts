@@ -13,6 +13,7 @@ import { VaultSearcher } from "../use-cases/vault-search.js";
 import { HybridSearcher } from "../use-cases/hybrid-search.js";
 import { FreeformEditor } from "../use-cases/freeform-editor.js";
 import { ReadByHeadingUseCase } from "../use-cases/read-by-heading.js";
+import { GetFrontmatterUseCase, SetFrontmatterUseCase } from "../use-cases/frontmatter.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { DomainError } from "../domain/errors/index.js";
 
@@ -87,10 +88,10 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("edit", {
     title: "Edit",
     description:
-      "Edit a note. AST operations (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform operations (line_replace/string_replace) provide fallback editing by line range or literal string.",
+      "Edit a note. AST operations (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform operations (line_replace/string_replace) provide fallback editing by line range or literal string. frontmatter_set merges fields into YAML frontmatter.",
     inputSchema: {
       path: z.string(),
-      operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace"]),
+      operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]),
       content: z.string(),
       heading: z.string().optional(),
       headingDepth: z.number().optional(),
@@ -121,6 +122,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         const result = FreeformEditor.stringReplace(source, searchText, content, replaceAll ?? false);
         await deps.fsAdapter.writeNote(notePath, result, true);
         return `Note patched: ${notePath} (string_replace)`;
+      }
+
+      // ── Frontmatter operation ──────────────────────────────────
+      if (operation === "frontmatter_set") {
+        const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
+        const useCase = new SetFrontmatterUseCase(repo);
+        const result = await useCase.execute({ path: notePath, content });
+        return result.message;
       }
 
       // ── AST operations ──────────────────────────────────────────
@@ -170,9 +179,9 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading).",
+      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading), frontmatter_get (read YAML frontmatter).",
     inputSchema: {
-      action: z.enum(["search", "global_search", "semantic_search", "outline", "read"]),
+      action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get"]),
       path: z.string().optional(),
       query: z.string().optional(),
       maxChunks: z.number().optional(),
@@ -243,6 +252,13 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           }
           const content = await deps.fsAdapter.readNote(notePath);
           return content;
+        }
+        case "frontmatter_get": {
+          if (!notePath) throw new Error("path is required for frontmatter_get");
+          const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
+          const useCase = new GetFrontmatterUseCase(repo);
+          const result = await useCase.execute({ path: notePath });
+          return result;
         }
         default:
           throw new Error(`Unknown view action: ${String(action)}`);
