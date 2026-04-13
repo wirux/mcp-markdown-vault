@@ -13,6 +13,7 @@ import { VaultSearcher } from "../use-cases/vault-search.js";
 import { HybridSearcher } from "../use-cases/hybrid-search.js";
 import { FreeformEditor } from "../use-cases/freeform-editor.js";
 import { ReadByHeadingUseCase } from "../use-cases/read-by-heading.js";
+import { BulkReadUseCase } from "../use-cases/bulk-read.js";
 import { GetFrontmatterUseCase, SetFrontmatterUseCase } from "../use-cases/frontmatter.js";
 import { UpdateFileUseCase } from "../use-cases/update-file.js";
 import { DryRunEditor } from "../use-cases/dry-run-edit.js";
@@ -207,17 +208,22 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading), frontmatter_get (read YAML frontmatter).",
+      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading), frontmatter_get (read YAML frontmatter), bulk_read (read multiple files/headings in one call).",
     inputSchema: {
-      action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get"]),
+      action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read"]),
       path: z.string().optional(),
       query: z.string().optional(),
       maxChunks: z.number().optional(),
       heading: z.string().optional(),
       headingDepth: z.number().optional(),
       directory: z.string().optional().describe("Filter search results to a specific directory or path prefix. Example: 'projects/active/'"),
+      items: z.array(z.object({
+        path: z.string(),
+        heading: z.string().optional(),
+        headingDepth: z.number().optional(),
+      })).optional().describe("For bulk_read: array of files to read, each with optional heading to extract."),
     },
-  }, async ({ action, path: notePath, query, maxChunks, heading, headingDepth, directory }) => {
+  }, async ({ action, path: notePath, query, maxChunks, heading, headingDepth, directory, items }) => {
     return wrapTool(deps.workflow, "view", async () => {
       switch (action) {
         case "search": {
@@ -289,6 +295,16 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
           const useCase = new GetFrontmatterUseCase(repo);
           const result = await useCase.execute({ path: notePath });
+          return result;
+        }
+        case "bulk_read": {
+          if (!items || items.length === 0) {
+            return { results: [] };
+          }
+          const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
+          const headingReader = new ReadByHeadingUseCase(repo, pipeline);
+          const bulkUseCase = new BulkReadUseCase(deps.fsAdapter, headingReader);
+          const result = await bulkUseCase.execute({ items });
           return result;
         }
         default:
