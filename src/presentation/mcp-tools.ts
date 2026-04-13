@@ -14,7 +14,10 @@ import { HybridSearcher } from "../use-cases/hybrid-search.js";
 import { FreeformEditor } from "../use-cases/freeform-editor.js";
 import { ReadByHeadingUseCase } from "../use-cases/read-by-heading.js";
 import { GetFrontmatterUseCase, SetFrontmatterUseCase } from "../use-cases/frontmatter.js";
+import { UpdateFileUseCase } from "../use-cases/update-file.js";
+import { DryRunEditor } from "../use-cases/dry-run-edit.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
+import { UnifiedDiffService } from "../infrastructure/diff-service.js";
 import { DomainError } from "../domain/errors/index.js";
 
 export interface McpDependencies {
@@ -42,9 +45,9 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("vault", {
     title: "Vault",
     description:
-      "Manage vault notes: list, read, create, delete, stat. Operates on .md files in the markdown vault.",
+      "Manage vault notes: list, read, create, update, delete, stat. Operates on .md files in the markdown vault.",
     inputSchema: {
-      action: z.enum(["list", "read", "create", "delete", "stat"]),
+      action: z.enum(["list", "read", "create", "update", "delete", "stat"]),
       path: z.string().optional(),
       directory: z.string().optional(),
       content: z.string().optional(),
@@ -67,6 +70,13 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           await deps.fsAdapter.writeNote(path, content);
           return `Note created: ${path}`;
         }
+        case "update": {
+          if (!path) throw new Error("path is required for update");
+          if (!content) throw new Error("content is required for update");
+          const useCase = new UpdateFileUseCase(deps.fsAdapter);
+          const result = await useCase.execute({ path, content });
+          return result.message;
+        }
         case "delete": {
           if (!path) throw new Error("path is required for delete");
           await deps.fsAdapter.deleteNote(path);
@@ -88,7 +98,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("edit", {
     title: "Edit",
     description:
-      "Edit a note. AST operations (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform operations (line_replace/string_replace) provide fallback editing by line range or literal string. frontmatter_set merges fields into YAML frontmatter.",
+      "Edit a note. AST operations (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform operations (line_replace/string_replace) provide fallback editing by line range or literal string. frontmatter_set merges fields into YAML frontmatter. Set dryRun=true to preview changes as a unified diff without saving.",
     inputSchema: {
       path: z.string(),
       operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]),
@@ -100,28 +110,41 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       endLine: z.number().optional(),
       searchText: z.string().optional(),
       replaceAll: z.boolean().optional(),
+      dryRun: z.boolean().optional().describe("If true, returns a preview of changes as a unified diff without saving to disk."),
     },
-  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll }) => {
+  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun }) => {
     return wrapTool(deps.workflow, "edit", async () => {
       const source = await deps.fsAdapter.readNote(notePath);
+      const diffService = new UnifiedDiffService();
+      const dryRunEditor = new DryRunEditor(deps.fsAdapter, diffService);
 
       // ── Freeform operations ─────────────────────────────────────
       if (operation === "line_replace") {
         if (startLine === undefined || endLine === undefined) {
           throw new Error("startLine and endLine are required for line_replace");
         }
-        const result = FreeformEditor.lineReplace(source, startLine, endLine, content);
-        await deps.fsAdapter.writeNote(notePath, result, true);
-        return `Note patched: ${notePath} (line_replace lines ${startLine}-${endLine})`;
+        const newContent = FreeformEditor.lineReplace(source, startLine, endLine, content);
+        return dryRunEditor.execute({
+          path: notePath,
+          oldContent: source,
+          newContent,
+          dryRun: dryRun ?? false,
+          operationLabel: `line_replace lines ${startLine}-${endLine}`,
+        });
       }
 
       if (operation === "string_replace") {
         if (!searchText) {
           throw new Error("searchText is required for string_replace");
         }
-        const result = FreeformEditor.stringReplace(source, searchText, content, replaceAll ?? false);
-        await deps.fsAdapter.writeNote(notePath, result, true);
-        return `Note patched: ${notePath} (string_replace)`;
+        const newContent = FreeformEditor.stringReplace(source, searchText, content, replaceAll ?? false);
+        return dryRunEditor.execute({
+          path: notePath,
+          oldContent: source,
+          newContent,
+          dryRun: dryRun ?? false,
+          operationLabel: "string_replace",
+        });
       }
 
       // ── Frontmatter operation ──────────────────────────────────
@@ -164,10 +187,15 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       }
 
       AstPatcher.apply(tree, { type: operation, target, content }, pipeline);
-      const result = pipeline.stringify(tree);
-      await deps.fsAdapter.writeNote(notePath, result, true);
+      const newContent = pipeline.stringify(tree);
 
-      return `Note patched: ${notePath} (${operation})`;
+      return dryRunEditor.execute({
+        path: notePath,
+        oldContent: source,
+        newContent,
+        dryRun: dryRun ?? false,
+        operationLabel: operation,
+      });
     });
   });
 
