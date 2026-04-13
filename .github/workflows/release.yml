@@ -9,6 +9,7 @@ permissions:
   packages: write
   issues: write
   pull-requests: write
+  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
