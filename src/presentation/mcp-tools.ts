@@ -12,6 +12,8 @@ import { FuzzyMatcher } from "../use-cases/fuzzy-match.js";
 import { VaultSearcher } from "../use-cases/vault-search.js";
 import { HybridSearcher } from "../use-cases/hybrid-search.js";
 import { FreeformEditor } from "../use-cases/freeform-editor.js";
+import { ReadByHeadingUseCase } from "../use-cases/read-by-heading.js";
+import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { DomainError } from "../domain/errors/index.js";
 
 export interface McpDependencies {
@@ -168,14 +170,16 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content).",
+      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading).",
     inputSchema: {
       action: z.enum(["search", "global_search", "semantic_search", "outline", "read"]),
       path: z.string().optional(),
       query: z.string().optional(),
       maxChunks: z.number().optional(),
+      heading: z.string().optional(),
+      headingDepth: z.number().optional(),
     },
-  }, async ({ action, path: notePath, query, maxChunks }) => {
+  }, async ({ action, path: notePath, query, maxChunks, heading, headingDepth }) => {
     return wrapTool(deps.workflow, "view", async () => {
       switch (action) {
         case "search": {
@@ -227,6 +231,16 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         }
         case "read": {
           if (!notePath) throw new Error("path is required for read");
+          if (heading) {
+            const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
+            const useCase = new ReadByHeadingUseCase(repo, pipeline);
+            const result = await useCase.execute({
+              path: notePath,
+              heading,
+              headingDepth,
+            });
+            return result;
+          }
           const content = await deps.fsAdapter.readNote(notePath);
           return content;
         }

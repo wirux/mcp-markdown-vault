@@ -6,3 +6,4 @@ export type {
   VectorChunk,
   VectorSearchResult,
 } from "./vector-store.js";
+export type { IMarkdownRepository } from "./markdown-repository.js";
