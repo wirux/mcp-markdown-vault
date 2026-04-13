@@ -15,7 +15,7 @@ npm install
 # Build (compiles to dist/, excludes test files)
 npm run build
 
-# Run all tests (285 tests across 24 files)
+# Run all tests (296 tests across 25 files)
 npm test
 
 # Run a single test file
@@ -36,8 +36,8 @@ docker compose up
 Clean Architecture with four layers:
 
 - **`src/domain/`** — Domain errors, port interfaces (`IFileSystemAdapter`, `IEmbeddingProvider`, `IVectorStore`, `IMarkdownRepository`), value objects (`SafePath`)
-- **`src/use-cases/`** — Business logic: AST parsing/patching, chunking, scoring, retrieval, hybrid search, read-by-heading, workflow state, hints, fuzzy matching, wikilink resolution, vault indexing
-- **`src/infrastructure/`** — Adapters: `LocalFileSystemAdapter` (fs/promises), `OllamaEmbeddingProvider` (REST), `TransformersEmbeddingProvider` (local `@huggingface/transformers`), `InMemoryVectorStore` (cosine similarity), `MarkdownFileRepository` (AST from file)
+- **`src/use-cases/`** — Business logic: AST parsing/patching, chunking, scoring, retrieval, hybrid search, read-by-heading, frontmatter management, workflow state, hints, fuzzy matching, wikilink resolution, vault indexing
+- **`src/infrastructure/`** — Adapters: `LocalFileSystemAdapter` (fs/promises), `OllamaEmbeddingProvider` (REST), `TransformersEmbeddingProvider` (local `@huggingface/transformers`), `InMemoryVectorStore` (cosine similarity), `MarkdownFileRepository` (AST + frontmatter from file)
 - **`src/presentation/`** — 5 MCP tool bindings (`createMcpServer()`), transport layer (`transport.ts`: stdio/SSE selection, Express SSE app)
 
 Entry point: `src/index.ts` — composition root, reads env vars, wires dependencies, selects transport.
@@ -54,7 +54,8 @@ Entry point: `src/index.ts` — composition root, reads env vars, wires dependen
 - **Vault Search** (`vault-search.ts`): cross-vault lexical keyword search using FragmentRetriever — no embeddings required
 - **Freeform Editor** (`freeform-editor.ts`): line-range replacement and literal string find/replace as fallback for non-AST content
 - **Read by Heading** (`read-by-heading.ts`): AST-based section extraction — reads content under a specific heading (up to next same-or-higher-level heading) to save context window space
-- **5 MCP Tools**: vault (CRUD), edit (AST patching + freeform line_replace/string_replace), view (fragment retrieval + global_search + semantic_search + outline + read by heading), workflow (state transitions), system (status)
+- **Frontmatter Management** (`frontmatter.ts`): safe read/update of YAML frontmatter via AST + `js-yaml` — merge fields without touching markdown body; `InvalidFrontmatterPayloadError` for malformed JSON input
+- **5 MCP Tools**: vault (CRUD), edit (AST patching + freeform line_replace/string_replace + frontmatter_set), view (fragment retrieval + global_search + semantic_search + outline + read by heading + frontmatter_get), workflow (state transitions), system (status)
 
 ### Security
 
