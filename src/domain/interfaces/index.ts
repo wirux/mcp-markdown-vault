@@ -7,3 +7,4 @@ export type {
   VectorSearchResult,
 } from "./vector-store.js";
 export type { IMarkdownRepository } from "./markdown-repository.js";
+export type { IDiffService } from "./diff-service.js";

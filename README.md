@@ -15,7 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-300%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-307%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
 
 </div>
 
@@ -45,7 +45,7 @@
 
 | | Feature | Description |
 |---|---|---|
-| 🗂️ | **Headless vault ops** | Read, create, edit, delete `.md` notes with strict path traversal protection |
+| 🗂️ | **Headless vault ops** | Read, create, update, edit, delete `.md` notes with strict path traversal protection |
 | 📑 | **Read by heading** | Read a single section by heading title — returns only content under that heading (up to the next same-level heading), saving context window space |
 | 🔬 | **Surgical editing** | AST-based patching targets specific headings or block IDs — never overwrites the whole file |
 | 🔍 | **Fragment retrieval** | Heading-aware chunking + TF-IDF + proximity scoring returns only relevant sections |
@@ -56,6 +56,7 @@
 | 🌐 | **Dual transport** | Stdio (single client) or SSE over HTTP (multi-client, Docker-friendly) |
 | ✏️ | **Freeform editing** | Line-range replacement and string find/replace as AST fallback |
 | 🏷️ | **Frontmatter management** | AST-based read and update of YAML frontmatter — safely manage tags, statuses, and metadata without corrupting file structure |
+| 👀 | **Dry-run / diff preview** | Preview any edit operation as a unified diff without saving — set `dryRun=true` on any edit action |
 | 🎯 | **Typo resilience** | Levenshtein-based fuzzy matching for edit operations |
 
 ---
@@ -64,8 +65,8 @@
 
 | Tool | Actions | Description |
 |---|---|---|
-| 📁 **vault** | `list` `read` `create` `delete` `stat` | Full CRUD for vault notes |
-| ✏️ **edit** | `append` `prepend` `replace` `line_replace` `string_replace` `frontmatter_set` | AST-based patching + freeform fallback + frontmatter update |
+| 📁 **vault** | `list` `read` `create` `update` `delete` `stat` | Full CRUD for vault notes |
+| ✏️ **edit** | `append` `prepend` `replace` `line_replace` `string_replace` `frontmatter_set` | AST-based patching + freeform fallback + frontmatter update (supports `dryRun` diff preview) |
 | 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` `frontmatter_get` | Fragment retrieval, cross-vault search, hybrid semantic search, read by heading, frontmatter read |
 | 🔄 **workflow** | `status` `transition` `history` `reset` | Petri net state machine control |
 | ⚙️ **system** | `status` `reindex` | Server health and indexing info |
@@ -222,7 +223,7 @@ Fully automated via GitHub Actions and [Semantic Release](https://semantic-relea
 
 ## 🧪 Testing
 
-**300 tests** across 25 files, written test-first (TDD).
+**307 tests** across 28 files, written test-first (TDD).
 
 ```bash
 npm test                                          # Run all tests

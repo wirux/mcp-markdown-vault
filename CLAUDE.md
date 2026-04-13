@@ -15,7 +15,7 @@ npm install
 # Build (compiles to dist/, excludes test files)
 npm run build
 
-# Run all tests (300 tests across 25 files)
+# Run all tests (307 tests across 28 files)
 npm test
 
 # Run a single test file
@@ -35,9 +35,9 @@ docker compose up
 
 Clean Architecture with four layers:
 
-- **`src/domain/`** — Domain errors, port interfaces (`IFileSystemAdapter`, `IEmbeddingProvider`, `IVectorStore`, `IMarkdownRepository`), value objects (`SafePath`)
-- **`src/use-cases/`** — Business logic: AST parsing/patching, chunking, scoring, retrieval, hybrid search, read-by-heading, frontmatter management, workflow state, hints, fuzzy matching, wikilink resolution, vault indexing
-- **`src/infrastructure/`** — Adapters: `LocalFileSystemAdapter` (fs/promises), `OllamaEmbeddingProvider` (REST), `TransformersEmbeddingProvider` (local `@huggingface/transformers`), `InMemoryVectorStore` (cosine similarity), `MarkdownFileRepository` (AST + frontmatter from file)
+- **`src/domain/`** — Domain errors, port interfaces (`IFileSystemAdapter`, `IEmbeddingProvider`, `IVectorStore`, `IMarkdownRepository`, `IDiffService`), value objects (`SafePath`)
+- **`src/use-cases/`** — Business logic: AST parsing/patching, chunking, scoring, retrieval, hybrid search, read-by-heading, frontmatter management, update-file, dry-run edit, workflow state, hints, fuzzy matching, wikilink resolution, vault indexing
+- **`src/infrastructure/`** — Adapters: `LocalFileSystemAdapter` (fs/promises), `OllamaEmbeddingProvider` (REST), `TransformersEmbeddingProvider` (local `@huggingface/transformers`), `InMemoryVectorStore` (cosine similarity), `MarkdownFileRepository` (AST + frontmatter from file), `UnifiedDiffService` (unified diff via `diff` package)
 - **`src/presentation/`** — 5 MCP tool bindings (`createMcpServer()`), transport layer (`transport.ts`: stdio/SSE selection, Express SSE app)
 
 Entry point: `src/index.ts` — composition root, reads env vars, wires dependencies, selects transport.
@@ -55,7 +55,9 @@ Entry point: `src/index.ts` — composition root, reads env vars, wires dependen
 - **Freeform Editor** (`freeform-editor.ts`): line-range replacement and literal string find/replace as fallback for non-AST content
 - **Read by Heading** (`read-by-heading.ts`): AST-based section extraction — reads content under a specific heading (up to next same-or-higher-level heading) to save context window space
 - **Frontmatter Management** (`frontmatter.ts`): safe read/update of YAML frontmatter via AST + `js-yaml` — merge fields without touching markdown body; `InvalidFrontmatterPayloadError` for malformed JSON input
-- **5 MCP Tools**: vault (CRUD), edit (AST patching + freeform line_replace/string_replace + frontmatter_set), view (fragment retrieval + global_search + semantic_search + outline + read by heading + frontmatter_get), workflow (state transitions), system (status)
+- **Update File** (`update-file.ts`): full content replacement with upsert semantics (create or overwrite)
+- **Dry-Run Edit** (`dry-run-edit.ts`): coordinates edit preview vs commit — when `dryRun=true`, returns unified diff via `IDiffService` without writing; when false, writes to disk
+- **5 MCP Tools**: vault (CRUD + update), edit (AST patching + freeform line_replace/string_replace + frontmatter_set + dryRun diff preview), view (fragment retrieval + global_search + semantic_search + outline + read by heading + frontmatter_get), workflow (state transitions), system (status)
 
 ### Security
 

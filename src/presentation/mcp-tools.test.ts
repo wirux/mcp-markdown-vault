@@ -241,7 +241,7 @@ describe("edit tool", () => {
     });
     const content = result.content as Array<{ type: string; text: string }>;
     const parsed = JSON.parse(content[0]!.text);
-    expect(parsed.result).toContain("patched");
+    expect(parsed.result.message).toContain("patched");
 
     const fileContent = await fs.readFile(
       path.join(tmpDir, "hello.md"),
@@ -264,7 +264,7 @@ describe("edit tool", () => {
     });
     const content = result.content as Array<{ type: string; text: string }>;
     const parsed = JSON.parse(content[0]!.text);
-    expect(parsed.result).toContain("line_replace");
+    expect(parsed.result.message).toContain("line_replace");
 
     const fileContent = await fs.readFile(
       path.join(tmpDir, "daily/2024-01-01.md"),
@@ -286,7 +286,7 @@ describe("edit tool", () => {
     });
     const content = result.content as Array<{ type: string; text: string }>;
     const parsed = JSON.parse(content[0]!.text);
-    expect(parsed.result).toContain("string_replace");
+    expect(parsed.result.message).toContain("string_replace");
 
     const fileContent = await fs.readFile(
       path.join(tmpDir, "hello.md"),
