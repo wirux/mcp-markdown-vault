@@ -210,6 +210,25 @@ describe("HybridSearcher", () => {
     });
   });
 
+  describe("directory scoping", () => {
+    it("filters results to a specific directory when provided", async () => {
+      const results = await searcher.search("recipe", {
+        k: 4,
+        directory: "recipes",
+      });
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results.every((r) => r.docPath.startsWith("recipes/"))).toBe(true);
+    });
+
+    it("returns results from all directories when no directory is provided", async () => {
+      const results = await searcher.search("recipe", { k: 4 });
+
+      // Without directory filter, results can come from any doc path
+      expect(results.length).toBeGreaterThan(0);
+    });
+  });
+
   describe("options", () => {
     it("respects k limit", async () => {
       const results = await searcher.search("recipe", { k: 2 });

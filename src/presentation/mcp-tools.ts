@@ -187,8 +187,9 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       maxChunks: z.number().optional(),
       heading: z.string().optional(),
       headingDepth: z.number().optional(),
+      directory: z.string().optional().describe("Filter search results to a specific directory or path prefix. Example: 'projects/active/'"),
     },
-  }, async ({ action, path: notePath, query, maxChunks, heading, headingDepth }) => {
+  }, async ({ action, path: notePath, query, maxChunks, heading, headingDepth, directory }) => {
     return wrapTool(deps.workflow, "view", async () => {
       switch (action) {
         case "search": {
@@ -209,6 +210,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           if (!query) throw new Error("query is required for global_search");
           const results = await vaultSearcher.search(query, {
             maxResults: maxChunks ?? 20,
+            directory,
           });
           return results.map((r) => ({
             filePath: r.filePath,
@@ -222,6 +224,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           if (!query) throw new Error("query is required for semantic_search");
           const results = await hybridSearcher.search(query, {
             k: maxChunks ?? 10,
+            directory,
           });
           return results.map((r) => ({
             docPath: r.docPath,

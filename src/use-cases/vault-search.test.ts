@@ -6,7 +6,14 @@ function createMockFs(
   files: Record<string, string>,
 ): IFileSystemAdapter {
   return {
-    listNotes: vi.fn(async () => Object.keys(files)),
+    listNotes: vi.fn(async (directory?: string) => {
+      const keys = Object.keys(files);
+      if (directory) {
+        const prefix = directory.endsWith("/") ? directory : `${directory}/`;
+        return keys.filter((k) => k.startsWith(prefix));
+      }
+      return keys;
+    }),
     readNote: vi.fn(async (path: string) => {
       const content = files[path];
       if (content === undefined) throw new Error(`Not found: ${path}`);
@@ -123,6 +130,27 @@ describe("VaultSearcher", () => {
 
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]!.filePath).toBe("flat.md");
+  });
+
+  it("scopes search to a directory when directory option is provided", async () => {
+    const fs = createMockFs(testVault);
+    const searcher = new VaultSearcher(fs);
+
+    const results = await searcher.search("pasta", { directory: "cooking" });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((r) => r.filePath.startsWith("cooking/"))).toBe(true);
+  });
+
+  it("searches all files when no directory option is provided", async () => {
+    const fs = createMockFs(testVault);
+    const searcher = new VaultSearcher(fs);
+
+    const results = await searcher.search("quantum entanglement");
+
+    // Without directory filter, listNotes is called for the entire vault
+    expect(fs.listNotes).toHaveBeenCalledWith(undefined);
+    expect(results.length).toBeGreaterThan(0);
   });
 
   it("skips unreadable files gracefully", async () => {
