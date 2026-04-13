@@ -15,7 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-277%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-285%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
 
 </div>
 
@@ -46,6 +46,7 @@
 | | Feature | Description |
 |---|---|---|
 | 🗂️ | **Headless vault ops** | Read, create, edit, delete `.md` notes with strict path traversal protection |
+| 📑 | **Read by heading** | Read a single section by heading title — returns only content under that heading (up to the next same-level heading), saving context window space |
 | 🔬 | **Surgical editing** | AST-based patching targets specific headings or block IDs — never overwrites the whole file |
 | 🔍 | **Fragment retrieval** | Heading-aware chunking + TF-IDF + proximity scoring returns only relevant sections |
 | 🧠 | **Semantic search** | Hybrid vector + lexical search with background auto-indexing |
@@ -63,7 +64,7 @@
 |---|---|---|
 | 📁 **vault** | `list` `read` `create` `delete` `stat` | Full CRUD for vault notes |
 | ✏️ **edit** | `append` `prepend` `replace` `line_replace` `string_replace` | AST-based patching + freeform fallback |
-| 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` | Fragment retrieval, cross-vault search, hybrid semantic search |
+| 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` | Fragment retrieval, cross-vault search, hybrid semantic search, read by heading |
 | 🔄 **workflow** | `status` `transition` `history` `reset` | Petri net state machine control |
 | ⚙️ **system** | `status` `reindex` | Server health and indexing info |
 
@@ -219,7 +220,7 @@ Fully automated via GitHub Actions and [Semantic Release](https://semantic-relea
 
 ## 🧪 Testing
 
-**277 tests** across 22 files, written test-first (TDD).
+**285 tests** across 24 files, written test-first (TDD).
 
 ```bash
 npm test                                          # Run all tests
