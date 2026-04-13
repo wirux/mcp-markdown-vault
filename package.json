@@ -1,15 +1,15 @@
 {
   "name": "@wirux/mcp-markdown-vault",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Headless semantic MCP server for Obsidian, Logseq, Dendron and any markdown-based knowledge base",
   "type": "module",
   "publishConfig": {
     "access": "public"
   },
   "repository": {
-      "type": "git",
-      "url": "git+https://github.com/wirux/mcp-markdown-vault.git"
-    },
+    "type": "git",
+    "url": "git+https://github.com/wirux/mcp-markdown-vault.git"
+  },
   "main": "dist/index.js",
   "bin": {
     "markdown-vault-mcp": "dist/index.js"
