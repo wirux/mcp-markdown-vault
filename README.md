@@ -15,7 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-307%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-310%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
 
 </div>
 
@@ -47,6 +47,7 @@
 |---|---|---|
 | 🗂️ | **Headless vault ops** | Read, create, update, edit, delete `.md` notes with strict path traversal protection |
 | 📑 | **Read by heading** | Read a single section by heading title — returns only content under that heading (up to the next same-level heading), saving context window space |
+| 📦 | **Bulk read** | Read multiple files and/or heading-scoped sections in a single call — reduces MCP round-trips with per-item fault tolerance |
 | 🔬 | **Surgical editing** | AST-based patching targets specific headings or block IDs — never overwrites the whole file |
 | 🔍 | **Fragment retrieval** | Heading-aware chunking + TF-IDF + proximity scoring returns only relevant sections |
 | 📂 | **Scoped search** | Optional directory filter for `global_search` and `semantic_search` — restrict results to specific folders to reduce noise |
@@ -67,7 +68,7 @@
 |---|---|---|
 | 📁 **vault** | `list` `read` `create` `update` `delete` `stat` | Full CRUD for vault notes |
 | ✏️ **edit** | `append` `prepend` `replace` `line_replace` `string_replace` `frontmatter_set` | AST-based patching + freeform fallback + frontmatter update (supports `dryRun` diff preview) |
-| 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` `frontmatter_get` | Fragment retrieval, cross-vault search, hybrid semantic search, read by heading, frontmatter read |
+| 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` `frontmatter_get` `bulk_read` | Fragment retrieval, cross-vault search, hybrid semantic search, read by heading, frontmatter read, bulk read |
 | 🔄 **workflow** | `status` `transition` `history` `reset` | Petri net state machine control |
 | ⚙️ **system** | `status` `reindex` | Server health and indexing info |
 
@@ -223,7 +224,7 @@ Fully automated via GitHub Actions and [Semantic Release](https://semantic-relea
 
 ## 🧪 Testing
 
-**307 tests** across 28 files, written test-first (TDD).
+**310 tests** across 29 files, written test-first (TDD).
 
 ```bash
 npm test                                          # Run all tests
