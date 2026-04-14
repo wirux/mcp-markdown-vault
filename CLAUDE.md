@@ -110,4 +110,4 @@ All file operations route through `SafePath` value object — prevents path trav
 - **Docker:** multi-arch images (`linux/amd64` + `linux/arm64`) pushed to `ghcr.io/wirux/mcp-markdown-vault`
 - **PR Check** (`.github/workflows/pr-check.yml`): lint → build → test → Docker dry run on every PR to `main`
 - **Release** (`.github/workflows/release.yml`): lint → test → semantic-release → Docker build & push on push to `main`
-- `docker-compose.yml` uses the pre-built `ghcr.io/wirux/mcp-markdown-vault:latest` image (not local build)
+- `docker-compose.yml` uses the pre-built `ghcr.io/wirux/mcp-markdown-vault:latest` image (not local build) 
