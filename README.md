@@ -20,6 +20,12 @@
 
 </div>
 
+<div align="center">
+
+![Markdown Vault MCP Server Demo](assets/demo.gif)
+
+</div>
+
 ---
 
 ## 💡 Why this server?
