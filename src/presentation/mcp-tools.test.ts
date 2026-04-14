@@ -7,6 +7,8 @@ import { LocalFileSystemAdapter } from "../infrastructure/local-fs-adapter.js";
 import { InMemoryVectorStore } from "../infrastructure/in-memory-vector-store.js";
 import { WorkflowStateMachine } from "../use-cases/workflow-state.js";
 import type { IEmbeddingProvider } from "../domain/interfaces/index.js";
+import { MarkdownPipeline } from "../use-cases/markdown-pipeline.js";
+import { BacklinkIndexService } from "../use-cases/backlink-index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
@@ -41,7 +43,7 @@ beforeEach(async () => {
   );
   await fs.writeFile(
     path.join(tmpDir, "daily/2024-01-01.md"),
-    "# Daily Note\n\nToday I learned about MCP.\n",
+    "# Daily Note\n\nToday I learned about MCP. See [[hello]].\n",
   );
 
   const fsAdapter = await LocalFileSystemAdapter.create(tmpDir);
@@ -49,7 +51,15 @@ beforeEach(async () => {
   const embedder = new FakeEmbedder();
   const workflow = new WorkflowStateMachine();
 
-  deps = { fsAdapter, vectorStore, embedder, workflow, vaultRoot: tmpDir };
+  // Backlink index
+  const backlinkPipeline = new MarkdownPipeline();
+  const backlinkIndex = new BacklinkIndexService(backlinkPipeline);
+  backlinkIndex.rebuildIndex([
+    { path: "hello.md", content: "---\ntitle: Hello\n---\n\n# Hello World\n\nWelcome to the vault.\n\n## Getting Started\n\nStart here.\n" },
+    { path: "daily/2024-01-01.md", content: "# Daily Note\n\nToday I learned about MCP. See [[hello]].\n" },
+  ]);
+
+  deps = { fsAdapter, vectorStore, embedder, workflow, vaultRoot: tmpDir, backlinkIndex };
 
   const server = createMcpServer(deps);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -223,6 +233,21 @@ describe("view tool", () => {
     });
     expect(result.isError).toBe(true);
   });
+
+  it("returns backlinks for a target note", async () => {
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.target).toBe("hello.md");
+    expect(parsed.result.count).toBe(1);
+    expect(parsed.result.backlinks).toHaveLength(1);
+    expect(parsed.result.backlinks[0].sourcePath).toBe("daily/2024-01-01.md");
+    expect(parsed.result.backlinks[0].linkType).toBe("wikilink");
+  });
 });
 
 // ── edit tool ─────────────────────────────────────────────────────
@@ -318,6 +343,29 @@ describe("edit tool", () => {
     });
     expect(result.isError).toBe(true);
   });
+
+  it("executes batch edit with multiple operations", async () => {
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        operations: [
+          { path: "hello.md", operation: "append", content: "Batch line 1." },
+          { path: "daily/2024-01-01.md", operation: "append", content: "Batch line 2." },
+        ],
+      },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.totalRequested).toBe(2);
+    expect(parsed.result.totalSucceeded).toBe(2);
+    expect(parsed.result.totalFailed).toBe(0);
+
+    const file1 = await fs.readFile(path.join(tmpDir, "hello.md"), "utf-8");
+    expect(file1).toContain("Batch line 1.");
+    const file2 = await fs.readFile(path.join(tmpDir, "daily/2024-01-01.md"), "utf-8");
+    expect(file2).toContain("Batch line 2.");
+  });
 });
 
 // ── workflow tool ─────────────────────────────────────────────────
@@ -352,10 +400,127 @@ describe("workflow tool", () => {
   });
 });
 
+// ── backlink live updates ─────────────────────────────────────────
+
+describe("backlink index — live updates via MCP operations", () => {
+  it("vault.create updates backlink index", async () => {
+    await client.callTool({
+      name: "vault",
+      arguments: {
+        action: "create",
+        path: "linker.md",
+        content: "# Linker\n\nSee [[hello]].\n",
+      },
+    });
+
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+
+    // daily/2024-01-01.md (from beforeEach) + linker.md (newly created)
+    expect(parsed.result.count).toBe(2);
+    const sources = parsed.result.backlinks.map((b: { sourcePath: string }) => b.sourcePath).sort();
+    expect(sources).toContain("linker.md");
+  });
+
+  it("vault.delete removes backlink entries from that source", async () => {
+    // First verify that daily/2024-01-01.md is a backlink source
+    const before = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const beforeParsed = JSON.parse((before.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(beforeParsed.result.count).toBe(1);
+
+    // Delete the file that is a link source
+    await client.callTool({
+      name: "vault",
+      arguments: { action: "delete", path: "daily/2024-01-01.md" },
+    });
+
+    const after = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const afterParsed = JSON.parse((after.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(afterParsed.result.count).toBe(0);
+  });
+
+  it("edit.string_replace updates backlink index", async () => {
+    // Create the link target
+    await client.callTool({
+      name: "vault",
+      arguments: {
+        action: "create",
+        path: "target.md",
+        content: "# Target\n",
+      },
+    });
+
+    // Replace text adding a link (string_replace bypasses AST, so wikilinks are preserved)
+    const editResult = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "hello.md",
+        operation: "string_replace",
+        searchText: "Welcome to the vault.",
+        content: "Welcome to the vault. See [[target]].",
+      },
+    });
+    expect(editResult.isError).toBeFalsy();
+
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "target.md" },
+    });
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(parsed.result.count).toBe(1);
+    expect(parsed.result.backlinks[0].sourcePath).toBe("hello.md");
+  });
+
+  it("full sequence: create → backlinks → delete → backlinks", async () => {
+    // 1. Create target
+    await client.callTool({
+      name: "vault",
+      arguments: { action: "create", path: "target.md", content: "# Target\n" },
+    });
+
+    // 2. Create a linking file
+    await client.callTool({
+      name: "vault",
+      arguments: { action: "create", path: "linker.md", content: "See [[target]]\n" },
+    });
+
+    // 3. Check backlinks — should be 1
+    const mid = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "target.md" },
+    });
+    const midParsed = JSON.parse((mid.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(midParsed.result.count).toBe(1);
+
+    // 4. Delete the linking file
+    await client.callTool({
+      name: "vault",
+      arguments: { action: "delete", path: "linker.md" },
+    });
+
+    // 5. Check backlinks — should be 0
+    const end = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "target.md" },
+    });
+    const endParsed = JSON.parse((end.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(endParsed.result.count).toBe(0);
+  });
+});
+
 // ── system tool ───────────────────────────────────────────────────
 
 describe("system tool", () => {
-  it("returns system status", async () => {
+  it("returns system status with backlinkIndexSize", async () => {
     const result = await client.callTool({
       name: "system",
       arguments: { action: "status" },
@@ -364,5 +529,29 @@ describe("system tool", () => {
     const parsed = JSON.parse(content[0]!.text);
     expect(parsed.result.vaultRoot).toBe(tmpDir);
     expect(typeof parsed.result.indexedDocuments).toBe("number");
+    expect(typeof parsed.result.backlinkIndexSize).toBe("number");
+    expect(parsed.result.backlinkIndexSize).toBeGreaterThan(0);
+  });
+
+  it("returns vault overview with folder structure", async () => {
+    const result = await client.callTool({
+      name: "system",
+      arguments: { action: "overview" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.totalFiles).toBe(2);
+    expect(Array.isArray(parsed.result.folders)).toBe(true);
+
+    // hello.md is in the root directory, so "." is the root
+    const root = parsed.result.folders.find((f: { path: string }) => f.path === ".");
+    expect(root).toBeDefined();
+    expect(root.fileCount).toBe(1);
+
+    // daily/ is a child of the root
+    const daily = root.children.find((f: { path: string }) => f.path === "daily");
+    expect(daily).toBeDefined();
+    expect(daily.fileCount).toBe(1);
   });
 });

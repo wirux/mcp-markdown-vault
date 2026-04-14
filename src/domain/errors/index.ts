@@ -113,6 +113,18 @@ export class InvalidFrontmatterPayloadError extends DomainError {
   }
 }
 
+// ── Batch errors ─────────────────────────────────────────────────
+
+export class BatchLimitExceededError extends DomainError {
+  constructor(count: number, limit: number) {
+    super(
+      "BATCH_LIMIT_EXCEEDED",
+      `Batch limit exceeded: ${count} operations requested, max ${limit} allowed`,
+    );
+    this.name = "BatchLimitExceededError";
+  }
+}
+
 // ── Workflow / State errors ────────────────────────────────────────
 
 export class StateTransitionError extends DomainError {

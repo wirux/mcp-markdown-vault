@@ -7,6 +7,8 @@ import { TransformersEmbeddingProvider } from "./infrastructure/transformers-emb
 import type { IEmbeddingProvider } from "./domain/interfaces/index.js";
 import { WorkflowStateMachine } from "./use-cases/workflow-state.js";
 import { VaultIndexer } from "./use-cases/vault-indexer.js";
+import { BacklinkIndexService } from "./use-cases/backlink-index.js";
+import { MarkdownPipeline } from "./use-cases/markdown-pipeline.js";
 import { createMcpServer } from "./presentation/mcp-tools.js";
 import {
   parseTransportType,
@@ -70,8 +72,22 @@ async function main(): Promise<void> {
   const vectorStore = new InMemoryVectorStore();
   const embedder = await createEmbeddingProvider();
 
+  // Backlink index — shared across connections
+  const backlinkIndex = new BacklinkIndexService(new MarkdownPipeline());
+
+  // Start background indexing (shared across all connections)
+  const indexer = new VaultIndexer(vaultRoot, vectorStore, embedder);
+
+  // Wire watcher callbacks to backlink index
+  indexer.setOnFileIndexed((relPath, content) => {
+    backlinkIndex.updateFile(relPath, content);
+  });
+  indexer.setOnFileRemoved((relPath) => {
+    backlinkIndex.removeFile(relPath);
+  });
+
   // Server factory: each connection gets its own McpServer + WorkflowStateMachine.
-  // Shared deps (fs, vectors, embedder) are captured by closure.
+  // Shared deps (fs, vectors, embedder, backlinkIndex, indexer) are captured by closure.
   const serverFactory = () =>
     createMcpServer({
       fsAdapter,
@@ -79,12 +95,25 @@ async function main(): Promise<void> {
       embedder,
       workflow: new WorkflowStateMachine(),
       vaultRoot,
+      backlinkIndex,
+      indexer,
     });
 
-  // Start background indexing (shared across all connections)
-  const indexer = new VaultIndexer(vaultRoot, vectorStore, embedder);
+  // Vector indexing + backlinks on startup
   indexer
     .indexAll()
+    .then(async () => {
+      // Build backlink index after vault indexing completes
+      const allFiles = await fsAdapter.listNotes();
+      const entries = await Promise.all(
+        allFiles.map(async (p) => ({
+          path: p,
+          content: await fsAdapter.readNote(p),
+        })),
+      );
+      backlinkIndex.rebuildIndex(entries);
+      console.error(`Backlink index built: ${allFiles.length} files`);
+    })
     .catch((err: unknown) =>
       console.error("Initial indexing failed:", err),
     );

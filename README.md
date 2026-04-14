@@ -15,7 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-318%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-342%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
 
 </div>
 
@@ -59,6 +59,9 @@
 | 🏷️ | **Frontmatter management** | AST-based read and update of YAML frontmatter — safely manage tags, statuses, and metadata without corrupting file structure |
 | 👀 | **Dry-run / diff preview** | Preview any edit operation as a unified diff without saving — set `dryRun=true` on any edit action |
 | 📝 | **Templating / scaffolding** | Create new notes from template files with `{{variable}}` placeholder injection — refuses to overwrite existing files |
+| 🗺️ | **Vault overview** | Structural map of the vault — total file count, recursive folder tree with file counts and last modification dates per folder |
+| 📦 | **Batch edit** | Apply multiple edit operations in a single call — sequential execution, stops on first error, supports `dryRun`, max 50 ops |
+| 🔗 | **Backlinks index** | Find all notes linking to a given path — supports wikilinks and markdown links with line numbers and context snippets |
 | 🎯 | **Typo resilience** | Levenshtein-based fuzzy matching for edit operations |
 
 ---
@@ -68,10 +71,10 @@
 | Tool | Actions | Description |
 |---|---|---|
 | 📁 **vault** | `list` `read` `create` `update` `delete` `stat` `create_from_template` | Full CRUD for vault notes + template scaffolding |
-| ✏️ **edit** | `append` `prepend` `replace` `line_replace` `string_replace` `frontmatter_set` | AST-based patching + freeform fallback + frontmatter update (supports `dryRun` diff preview) |
-| 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` `frontmatter_get` `bulk_read` | Fragment retrieval, cross-vault search, hybrid semantic search, read by heading, frontmatter read, bulk read |
+| ✏️ **edit** | `append` `prepend` `replace` `line_replace` `string_replace` `frontmatter_set` `batch` | AST-based patching + freeform fallback + frontmatter update + batch edit (supports `dryRun` diff preview) |
+| 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` `frontmatter_get` `bulk_read` `backlinks` | Fragment retrieval, cross-vault search, hybrid semantic search, read by heading, frontmatter read, bulk read, backlinks |
 | 🔄 **workflow** | `status` `transition` `history` `reset` | Petri net state machine control |
-| ⚙️ **system** | `status` `reindex` | Server health and indexing info |
+| ⚙️ **system** | `status` `reindex` `overview` | Server health, indexing info, vault structure overview |
 
 > All tool responses include contextual hints based on the current workflow state.
 

@@ -18,6 +18,10 @@ import { GetFrontmatterUseCase, SetFrontmatterUseCase } from "../use-cases/front
 import { UpdateFileUseCase } from "../use-cases/update-file.js";
 import { DryRunEditor } from "../use-cases/dry-run-edit.js";
 import { CreateFromTemplateUseCase } from "../use-cases/create-from-template.js";
+import { BatchEditService, type EditOperation } from "../use-cases/batch-edit.js";
+import { VaultOverviewService } from "../use-cases/vault-overview.js";
+import { BacklinkIndexService } from "../use-cases/backlink-index.js";
+import { VaultIndexer } from "../use-cases/vault-indexer.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
@@ -29,6 +33,8 @@ export interface McpDependencies {
   embedder: IEmbeddingProvider;
   workflow: WorkflowStateMachine;
   vaultRoot: string;
+  backlinkIndex?: BacklinkIndexService | undefined;
+  indexer?: VaultIndexer | undefined;
 }
 
 /**
@@ -73,6 +79,8 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           if (!path) throw new Error("path is required for create");
           if (!content) throw new Error("content is required for create");
           await deps.fsAdapter.writeNote(path, content);
+          deps.backlinkIndex?.updateFile(path, content);
+          deps.indexer?.indexFile(path).catch(() => {/* background */});
           return `Note created: ${path}`;
         }
         case "update": {
@@ -80,11 +88,15 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           if (!content) throw new Error("content is required for update");
           const useCase = new UpdateFileUseCase(deps.fsAdapter);
           const result = await useCase.execute({ path, content });
+          deps.backlinkIndex?.updateFile(path, content);
+          deps.indexer?.indexFile(path).catch(() => {/* background */});
           return result.message;
         }
         case "delete": {
           if (!path) throw new Error("path is required for delete");
           await deps.fsAdapter.deleteNote(path);
+          deps.backlinkIndex?.removeFile(path);
+          deps.indexer?.removeFile(path).catch(() => {/* background */});
           return `Note deleted: ${path}`;
         }
         case "stat": {
@@ -102,6 +114,10 @@ export function createMcpServer(deps: McpDependencies): McpServer {
             destinationPath: path,
             variables,
           });
+          // Update indexes after template creation
+          const created = await deps.fsAdapter.readNote(path);
+          deps.backlinkIndex?.updateFile(path, created);
+          deps.indexer?.indexFile(path).catch(() => {/* background */});
           return result.message;
         }
         default:
@@ -115,11 +131,11 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("edit", {
     title: "Edit",
     description:
-      "Edit a note. AST operations (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform operations (line_replace/string_replace) provide fallback editing by line range or literal string. frontmatter_set merges fields into YAML frontmatter. Set dryRun=true to preview changes as a unified diff without saving.",
+      "Edit notes. Single mode: provide path, operation, content. Batch mode: provide operations array (max 50, sequential, stops on first error). AST ops (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform ops (line_replace/string_replace) for line range or literal string. frontmatter_set merges YAML. dryRun=true previews as unified diff without writing.",
     inputSchema: {
-      path: z.string(),
-      operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]),
-      content: z.string(),
+      path: z.string().optional().describe("Note path (required for single edit)."),
+      operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]).optional().describe("Edit operation (required for single edit)."),
+      content: z.string().optional().describe("Content to apply (required for single edit)."),
       heading: z.string().optional(),
       headingDepth: z.number().optional(),
       blockId: z.string().optional(),
@@ -128,12 +144,67 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       searchText: z.string().optional(),
       replaceAll: z.boolean().optional(),
       dryRun: z.boolean().optional().describe("If true, returns a preview of changes as a unified diff without saving to disk."),
+      operations: z.array(z.object({
+        path: z.string(),
+        operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]),
+        content: z.string(),
+        heading: z.string().optional(),
+        headingDepth: z.number().optional(),
+        blockId: z.string().optional(),
+        startLine: z.number().optional(),
+        endLine: z.number().optional(),
+        searchText: z.string().optional(),
+        replaceAll: z.boolean().optional(),
+      })).optional().describe("For batch mode: array of edit operations (max 50). Executed sequentially, stops on first error."),
     },
-  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun }) => {
+  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun, operations }) => {
     return wrapTool(deps.workflow, "edit", async () => {
+      // Helper: update indexes after file write
+      // Backlinks synchronously (required for consistency), vectors in background
+      const syncIndexes = async (filePath: string): Promise<void> => {
+        const updated = await deps.fsAdapter.readNote(filePath);
+        deps.backlinkIndex?.updateFile(filePath, updated);
+        deps.indexer?.indexFile(filePath).catch(() => {/* background */});
+      };
+
+      // ── Batch mode ─────────────────────────────────────────────
+      if (operations && operations.length > 0) {
+        const diffService = new UnifiedDiffService();
+        const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
+        const batchService = new BatchEditService(deps.fsAdapter, pipeline, diffService, repo);
+        const batchResult = await batchService.execute({
+          operations: operations as EditOperation[],
+          dryRun,
+        });
+        // Update indexes for each successfully edited file (not dryRun)
+        if (!dryRun) {
+          const edited = new Set<string>();
+          for (const op of operations as EditOperation[]) {
+            edited.add(op.path);
+          }
+          for (const p of edited) {
+            await syncIndexes(p);
+          }
+        }
+        return batchResult;
+      }
+
+      // ── Single mode — validate required fields ─────────────
+      if (!notePath) throw new Error("path is required for single edit");
+      if (!operation) throw new Error("operation is required for single edit");
+      if (content === undefined) throw new Error("content is required for single edit");
+
       const source = await deps.fsAdapter.readNote(notePath);
       const diffService = new UnifiedDiffService();
       const dryRunEditor = new DryRunEditor(deps.fsAdapter, diffService);
+
+      // Helper: finalize edit and update indexes if not dryRun
+      const executeEdit = async (editResult: unknown): Promise<unknown> => {
+        if (!(dryRun ?? false)) {
+          await syncIndexes(notePath);
+        }
+        return editResult;
+      };
 
       // ── Freeform operations ─────────────────────────────────────
       if (operation === "line_replace") {
@@ -141,13 +212,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           throw new Error("startLine and endLine are required for line_replace");
         }
         const newContent = FreeformEditor.lineReplace(source, startLine, endLine, content);
-        return dryRunEditor.execute({
+        const result = await dryRunEditor.execute({
           path: notePath,
           oldContent: source,
           newContent,
           dryRun: dryRun ?? false,
           operationLabel: `line_replace lines ${startLine}-${endLine}`,
         });
+        return executeEdit(result);
       }
 
       if (operation === "string_replace") {
@@ -155,13 +227,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           throw new Error("searchText is required for string_replace");
         }
         const newContent = FreeformEditor.stringReplace(source, searchText, content, replaceAll ?? false);
-        return dryRunEditor.execute({
+        const result = await dryRunEditor.execute({
           path: notePath,
           oldContent: source,
           newContent,
           dryRun: dryRun ?? false,
           operationLabel: "string_replace",
         });
+        return executeEdit(result);
       }
 
       // ── Frontmatter operation ──────────────────────────────────
@@ -169,6 +242,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
         const useCase = new SetFrontmatterUseCase(repo);
         const result = await useCase.execute({ path: notePath, content });
+        await syncIndexes(notePath);
         return result.message;
       }
 
@@ -206,13 +280,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       AstPatcher.apply(tree, { type: operation, target, content }, pipeline);
       const newContent = pipeline.stringify(tree);
 
-      return dryRunEditor.execute({
+      const result = await dryRunEditor.execute({
         path: notePath,
         oldContent: source,
         newContent,
         dryRun: dryRun ?? false,
         operationLabel: operation,
       });
+      return executeEdit(result);
     });
   });
 
@@ -224,9 +299,9 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading), frontmatter_get (read YAML frontmatter), bulk_read (read multiple files/headings in one call).",
+      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading), frontmatter_get (read YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).",
     inputSchema: {
-      action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read"]),
+      action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read", "backlinks"]),
       path: z.string().optional(),
       query: z.string().optional(),
       maxChunks: z.number().optional(),
@@ -323,6 +398,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           const result = await bulkUseCase.execute({ items });
           return result;
         }
+        case "backlinks": {
+          if (!notePath) throw new Error("path is required for backlinks");
+          if (!deps.backlinkIndex) {
+            return { target: notePath, backlinks: [], count: 0 };
+          }
+          const backlinks = deps.backlinkIndex.getBacklinks(notePath);
+          return { target: notePath, backlinks, count: backlinks.length };
+        }
         default:
           throw new Error(`Unknown view action: ${String(action)}`);
       }
@@ -376,11 +459,12 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("system", {
     title: "System",
     description:
-      "System administration: check status, get indexing info, and manage the server.",
+      "System administration: check status, get indexing info, vault structure overview, and manage the server.",
     inputSchema: {
-      action: z.enum(["status", "reindex"]),
+      action: z.enum(["status", "reindex", "overview"]),
+      maxDepth: z.number().optional().describe("Maximum folder depth for overview (default 3)."),
     },
-  }, async ({ action }) => {
+  }, async ({ action, maxDepth }) => {
     return wrapTool(deps.workflow, "system", async () => {
       switch (action) {
         case "status": {
@@ -388,11 +472,35 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return {
             vaultRoot: deps.vaultRoot,
             indexedDocuments: indexedDocs,
+            backlinkIndexSize: deps.backlinkIndex?.indexSize ?? 0,
             workflowState: deps.workflow.currentPlace,
           };
         }
         case "reindex": {
+          if (deps.indexer) {
+            // Run re-indexing asynchronously (don't block the response)
+            deps.indexer.indexAll()
+              .then(async () => {
+                if (deps.backlinkIndex) {
+                  const allFiles = await deps.fsAdapter.listNotes();
+                  const entries = await Promise.all(
+                    allFiles.map(async (p) => ({
+                      path: p,
+                      content: await deps.fsAdapter.readNote(p),
+                    })),
+                  );
+                  deps.backlinkIndex.rebuildIndex(entries);
+                }
+              })
+              .catch((err: unknown) =>
+                console.error("Re-indexing failed:", err),
+              );
+          }
           return { message: "Re-indexing triggered (async)" };
+        }
+        case "overview": {
+          const overviewService = new VaultOverviewService(deps.fsAdapter);
+          return overviewService.getOverview(maxDepth);
         }
         default:
           throw new Error(`Unknown system action: ${String(action)}`);
