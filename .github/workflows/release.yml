@@ -66,7 +66,22 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
 
-  # ── Job C: Docker Build & Push ─────────────────────────────────────
+  # ── Job C: Notify Glama.ai ─────────────────────────────────────────
+  glama:
+    name: Sync Release to Glama
+    needs: release
+    if: needs.release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Glama of new release
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ secrets.GLAMA_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"version": "v${{ needs.release.outputs.new_release_version }}"}' \
+            https://glama.ai/api/mcp/release
+
+  # ── Job D: Docker Build & Push ─────────────────────────────────────
   docker:
     name: Docker Build & Push
     needs: release
