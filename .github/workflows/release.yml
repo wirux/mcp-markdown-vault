@@ -63,40 +63,10 @@ jobs:
           semantic_version: 25
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
 
-  # ── Job C: NPM Publish ────────────────────────────────────────────
-  npm-publish:
-    name: NPM Publish
-    needs: release
-    if: needs.release.outputs.new_release_published == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          registry-url: https://registry.npmjs.org
-
-      - name: Install latest npm (required for OIDC trusted publishing)
-        run: npm install -g npm@latest
-
-      - run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Set release version
-        run: npm version ${{ needs.release.outputs.new_release_version }} --no-git-tag-version
-
-      - name: Publish to NPM
-        run: npm publish --provenance --access public
-
-  # ── Job D: Docker Build & Push ─────────────────────────────────────
+  # ── Job C: Docker Build & Push ─────────────────────────────────────
   docker:
     name: Docker Build & Push
     needs: release
