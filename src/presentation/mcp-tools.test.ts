@@ -400,10 +400,127 @@ describe("workflow tool", () => {
   });
 });
 
+// ── backlink live updates ─────────────────────────────────────────
+
+describe("backlink index — live updates via MCP operations", () => {
+  it("vault.create aktualizuje indeks backlinków", async () => {
+    await client.callTool({
+      name: "vault",
+      arguments: {
+        action: "create",
+        path: "linker.md",
+        content: "# Linker\n\nSee [[hello]].\n",
+      },
+    });
+
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+
+    // daily/2024-01-01.md (z beforeEach) + linker.md (nowo utworzony)
+    expect(parsed.result.count).toBe(2);
+    const sources = parsed.result.backlinks.map((b: { sourcePath: string }) => b.sourcePath).sort();
+    expect(sources).toContain("linker.md");
+  });
+
+  it("vault.delete usuwa wpisy backlinków z tego źródła", async () => {
+    // Najpierw upewnij się, że daily/2024-01-01.md jest źródłem backlinku
+    const before = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const beforeParsed = JSON.parse((before.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(beforeParsed.result.count).toBe(1);
+
+    // Usuń plik będący źródłem linku
+    await client.callTool({
+      name: "vault",
+      arguments: { action: "delete", path: "daily/2024-01-01.md" },
+    });
+
+    const after = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const afterParsed = JSON.parse((after.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(afterParsed.result.count).toBe(0);
+  });
+
+  it("edit.string_replace aktualizuje indeks backlinków", async () => {
+    // Utwórz cel linkowania
+    await client.callTool({
+      name: "vault",
+      arguments: {
+        action: "create",
+        path: "target.md",
+        content: "# Target\n",
+      },
+    });
+
+    // Zamień tekst dodając link (string_replace nie przechodzi przez AST, więc zachowuje wikilinki)
+    const editResult = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "hello.md",
+        operation: "string_replace",
+        searchText: "Welcome to the vault.",
+        content: "Welcome to the vault. See [[target]].",
+      },
+    });
+    expect(editResult.isError).toBeFalsy();
+
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "target.md" },
+    });
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(parsed.result.count).toBe(1);
+    expect(parsed.result.backlinks[0].sourcePath).toBe("hello.md");
+  });
+
+  it("pełna sekwencja: create → backlinks → delete → backlinks", async () => {
+    // 1. Utwórz cel
+    await client.callTool({
+      name: "vault",
+      arguments: { action: "create", path: "target.md", content: "# Target\n" },
+    });
+
+    // 2. Utwórz plik linkujący
+    await client.callTool({
+      name: "vault",
+      arguments: { action: "create", path: "linker.md", content: "See [[target]]\n" },
+    });
+
+    // 3. Sprawdź backlinki — powinien być 1
+    const mid = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "target.md" },
+    });
+    const midParsed = JSON.parse((mid.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(midParsed.result.count).toBe(1);
+
+    // 4. Usuń plik linkujący
+    await client.callTool({
+      name: "vault",
+      arguments: { action: "delete", path: "linker.md" },
+    });
+
+    // 5. Sprawdź backlinki — powinien być 0
+    const end = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "target.md" },
+    });
+    const endParsed = JSON.parse((end.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(endParsed.result.count).toBe(0);
+  });
+});
+
 // ── system tool ───────────────────────────────────────────────────
 
 describe("system tool", () => {
-  it("returns system status", async () => {
+  it("returns system status with backlinkIndexSize", async () => {
     const result = await client.callTool({
       name: "system",
       arguments: { action: "status" },
@@ -412,6 +529,8 @@ describe("system tool", () => {
     const parsed = JSON.parse(content[0]!.text);
     expect(parsed.result.vaultRoot).toBe(tmpDir);
     expect(typeof parsed.result.indexedDocuments).toBe("number");
+    expect(typeof parsed.result.backlinkIndexSize).toBe("number");
+    expect(parsed.result.backlinkIndexSize).toBeGreaterThan(0);
   });
 
   it("returns vault overview with folder structure", async () => {

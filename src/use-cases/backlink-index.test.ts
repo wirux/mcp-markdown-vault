@@ -101,6 +101,22 @@ describe("BacklinkIndexService", () => {
     expect(backlinks).toHaveLength(0);
   });
 
+  it("removeFile usuwa wpisy backlinków z tego źródła", () => {
+    service.rebuildIndex([
+      { path: "a.md", content: "See [[C]].\n" },
+      { path: "b.md", content: "Also [[C]].\n" },
+      { path: "c.md", content: "# C\n" },
+    ]);
+
+    expect(service.getBacklinks("c.md")).toHaveLength(2);
+
+    service.removeFile("a.md");
+
+    const remaining = service.getBacklinks("c.md");
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.sourcePath).toBe("b.md");
+  });
+
   it("normalizacja celu niezależna od wielkości liter", () => {
     service.rebuildIndex([
       { path: "a.md", content: "See [[B]].\n" },

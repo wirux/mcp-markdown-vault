@@ -75,8 +75,19 @@ async function main(): Promise<void> {
   // Indeks backlinków — współdzielony między połączeniami
   const backlinkIndex = new BacklinkIndexService(new MarkdownPipeline());
 
+  // Start background indexing (shared across all connections)
+  const indexer = new VaultIndexer(vaultRoot, vectorStore, embedder);
+
+  // Podłącz callbacki watchera do indeksu backlinków
+  indexer.setOnFileIndexed((relPath, content) => {
+    backlinkIndex.updateFile(relPath, content);
+  });
+  indexer.setOnFileRemoved((relPath) => {
+    backlinkIndex.removeFile(relPath);
+  });
+
   // Server factory: each connection gets its own McpServer + WorkflowStateMachine.
-  // Shared deps (fs, vectors, embedder, backlinkIndex) are captured by closure.
+  // Shared deps (fs, vectors, embedder, backlinkIndex, indexer) are captured by closure.
   const serverFactory = () =>
     createMcpServer({
       fsAdapter,
@@ -85,10 +96,8 @@ async function main(): Promise<void> {
       workflow: new WorkflowStateMachine(),
       vaultRoot,
       backlinkIndex,
+      indexer,
     });
-
-  // Start background indexing (shared across all connections)
-  const indexer = new VaultIndexer(vaultRoot, vectorStore, embedder);
 
   // Indeksowanie wektorowe + backlinki na starcie
   indexer

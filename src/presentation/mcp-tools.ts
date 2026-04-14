@@ -21,6 +21,7 @@ import { CreateFromTemplateUseCase } from "../use-cases/create-from-template.js"
 import { BatchEditService, type EditOperation } from "../use-cases/batch-edit.js";
 import { VaultOverviewService } from "../use-cases/vault-overview.js";
 import { BacklinkIndexService } from "../use-cases/backlink-index.js";
+import { VaultIndexer } from "../use-cases/vault-indexer.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
@@ -33,6 +34,7 @@ export interface McpDependencies {
   workflow: WorkflowStateMachine;
   vaultRoot: string;
   backlinkIndex?: BacklinkIndexService | undefined;
+  indexer?: VaultIndexer | undefined;
 }
 
 /**
@@ -77,6 +79,8 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           if (!path) throw new Error("path is required for create");
           if (!content) throw new Error("content is required for create");
           await deps.fsAdapter.writeNote(path, content);
+          deps.backlinkIndex?.updateFile(path, content);
+          deps.indexer?.indexFile(path).catch(() => {/* tło */});
           return `Note created: ${path}`;
         }
         case "update": {
@@ -84,11 +88,15 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           if (!content) throw new Error("content is required for update");
           const useCase = new UpdateFileUseCase(deps.fsAdapter);
           const result = await useCase.execute({ path, content });
+          deps.backlinkIndex?.updateFile(path, content);
+          deps.indexer?.indexFile(path).catch(() => {/* tło */});
           return result.message;
         }
         case "delete": {
           if (!path) throw new Error("path is required for delete");
           await deps.fsAdapter.deleteNote(path);
+          deps.backlinkIndex?.removeFile(path);
+          deps.indexer?.removeFile(path).catch(() => {/* tło */});
           return `Note deleted: ${path}`;
         }
         case "stat": {
@@ -106,6 +114,10 @@ export function createMcpServer(deps: McpDependencies): McpServer {
             destinationPath: path,
             variables,
           });
+          // Zaktualizuj indeksy po utworzeniu z szablonu
+          const created = await deps.fsAdapter.readNote(path);
+          deps.backlinkIndex?.updateFile(path, created);
+          deps.indexer?.indexFile(path).catch(() => {/* tło */});
           return result.message;
         }
         default:
@@ -147,15 +159,34 @@ export function createMcpServer(deps: McpDependencies): McpServer {
     },
   }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun, operations }) => {
     return wrapTool(deps.workflow, "edit", async () => {
+      // Helper: aktualizuj indeksy po zapisie pliku
+      // Backlinki synchronicznie (wymagane dla spójności), wektory w tle
+      const syncIndexes = async (filePath: string): Promise<void> => {
+        const updated = await deps.fsAdapter.readNote(filePath);
+        deps.backlinkIndex?.updateFile(filePath, updated);
+        deps.indexer?.indexFile(filePath).catch(() => {/* tło */});
+      };
+
       // ── Tryb batch ─────────────────────────────────────────────
       if (operations && operations.length > 0) {
         const diffService = new UnifiedDiffService();
         const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
         const batchService = new BatchEditService(deps.fsAdapter, pipeline, diffService, repo);
-        return batchService.execute({
+        const batchResult = await batchService.execute({
           operations: operations as EditOperation[],
           dryRun,
         });
+        // Zaktualizuj indeksy dla każdej pomyślnej operacji (nie dryRun)
+        if (!dryRun) {
+          const edited = new Set<string>();
+          for (const op of operations as EditOperation[]) {
+            edited.add(op.path);
+          }
+          for (const p of edited) {
+            await syncIndexes(p);
+          }
+        }
+        return batchResult;
       }
 
       // ── Tryb pojedynczy — walidacja wymaganych pól ─────────────
@@ -167,19 +198,28 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       const diffService = new UnifiedDiffService();
       const dryRunEditor = new DryRunEditor(deps.fsAdapter, diffService);
 
+      // Helper: wykonaj edycję i zaktualizuj indeksy jeśli nie dryRun
+      const executeEdit = async (editResult: unknown): Promise<unknown> => {
+        if (!(dryRun ?? false)) {
+          await syncIndexes(notePath);
+        }
+        return editResult;
+      };
+
       // ── Freeform operations ─────────────────────────────────────
       if (operation === "line_replace") {
         if (startLine === undefined || endLine === undefined) {
           throw new Error("startLine and endLine are required for line_replace");
         }
         const newContent = FreeformEditor.lineReplace(source, startLine, endLine, content);
-        return dryRunEditor.execute({
+        const result = await dryRunEditor.execute({
           path: notePath,
           oldContent: source,
           newContent,
           dryRun: dryRun ?? false,
           operationLabel: `line_replace lines ${startLine}-${endLine}`,
         });
+        return executeEdit(result);
       }
 
       if (operation === "string_replace") {
@@ -187,13 +227,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           throw new Error("searchText is required for string_replace");
         }
         const newContent = FreeformEditor.stringReplace(source, searchText, content, replaceAll ?? false);
-        return dryRunEditor.execute({
+        const result = await dryRunEditor.execute({
           path: notePath,
           oldContent: source,
           newContent,
           dryRun: dryRun ?? false,
           operationLabel: "string_replace",
         });
+        return executeEdit(result);
       }
 
       // ── Frontmatter operation ──────────────────────────────────
@@ -201,6 +242,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
         const useCase = new SetFrontmatterUseCase(repo);
         const result = await useCase.execute({ path: notePath, content });
+        await syncIndexes(notePath);
         return result.message;
       }
 
@@ -238,13 +280,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       AstPatcher.apply(tree, { type: operation, target, content }, pipeline);
       const newContent = pipeline.stringify(tree);
 
-      return dryRunEditor.execute({
+      const result = await dryRunEditor.execute({
         path: notePath,
         oldContent: source,
         newContent,
         dryRun: dryRun ?? false,
         operationLabel: operation,
       });
+      return executeEdit(result);
     });
   });
 
@@ -429,10 +472,30 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return {
             vaultRoot: deps.vaultRoot,
             indexedDocuments: indexedDocs,
+            backlinkIndexSize: deps.backlinkIndex?.indexSize ?? 0,
             workflowState: deps.workflow.currentPlace,
           };
         }
         case "reindex": {
+          if (deps.indexer) {
+            // Uruchom reindeksację asynchronicznie (nie blokuj odpowiedzi)
+            deps.indexer.indexAll()
+              .then(async () => {
+                if (deps.backlinkIndex) {
+                  const allFiles = await deps.fsAdapter.listNotes();
+                  const entries = await Promise.all(
+                    allFiles.map(async (p) => ({
+                      path: p,
+                      content: await deps.fsAdapter.readNote(p),
+                    })),
+                  );
+                  deps.backlinkIndex.rebuildIndex(entries);
+                }
+              })
+              .catch((err: unknown) =>
+                console.error("Re-indexing failed:", err),
+              );
+          }
           return { message: "Re-indexing triggered (async)" };
         }
         case "overview": {

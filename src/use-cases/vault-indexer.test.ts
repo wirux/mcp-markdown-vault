@@ -103,6 +103,41 @@ describe("VaultIndexer", () => {
     });
   });
 
+  describe("onFileIndexed callback", () => {
+    it("wywołuje callback po pomyślnym zaindeksowaniu pliku", async () => {
+      const calls: Array<{ path: string; content: string }> = [];
+      indexer.setOnFileIndexed((relPath, content) => {
+        calls.push({ path: relPath, content });
+      });
+
+      await fs.writeFile(
+        path.join(tmpDir, "cb.md"),
+        "# Callback\n\nTest content.\n",
+      );
+      await indexer.indexFile("cb.md");
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.path).toBe("cb.md");
+      expect(calls[0]!.content).toContain("Test content.");
+    });
+
+    it("wywołuje callback onFileRemoved po usunięciu pliku", async () => {
+      const removedPaths: string[] = [];
+      indexer.setOnFileRemoved((relPath) => {
+        removedPaths.push(relPath);
+      });
+
+      await fs.writeFile(
+        path.join(tmpDir, "rm.md"),
+        "# Remove me\n",
+      );
+      await indexer.indexFile("rm.md");
+      await indexer.removeFile("rm.md");
+
+      expect(removedPaths).toEqual(["rm.md"]);
+    });
+  });
+
   describe("removeFile", () => {
     it("removes a deleted note from the vector store", async () => {
       await fs.writeFile(

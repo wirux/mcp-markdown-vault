@@ -16,4 +16,7 @@ export interface IBacklinkIndex {
 
   /** Aktualizuje indeks dla pojedynczego pliku (usuwa stare wpisy i dodaje nowe). */
   updateFile(path: string, content: string): void;
+
+  /** Usuwa wszystkie wpisy backlinków gdzie plik jest źródłem linku. */
+  removeFile(path: string): void;
 }

@@ -97,6 +97,11 @@ export class BacklinkIndexService implements IBacklinkIndex {
 
   constructor(private readonly pipeline: MarkdownPipeline) {}
 
+  /** Liczba unikalnych celów śledzonych w indeksie. */
+  get indexSize(): number {
+    return this.index.size;
+  }
+
   getBacklinks(targetPath: string): BacklinkEntry[] {
     const key = normalizeKey(targetPath);
     return this.index.get(key) ?? [];
@@ -111,7 +116,13 @@ export class BacklinkIndexService implements IBacklinkIndex {
   }
 
   updateFile(filePath: string, content: string): void {
-    // Usuń stare wpisy dla tego pliku źródłowego
+    // Usuń stare wpisy i dodaj nowe
+    this.removeFile(filePath);
+    this.processFile(filePath, content);
+  }
+
+  removeFile(filePath: string): void {
+    // Usuń wszystkie wpisy gdzie sourcePath === filePath
     for (const [key, entries] of this.index) {
       const filtered = entries.filter((e) => e.sourcePath !== filePath);
       if (filtered.length === 0) {
@@ -120,8 +131,6 @@ export class BacklinkIndexService implements IBacklinkIndex {
         this.index.set(key, filtered);
       }
     }
-    // Przetwórz nową zawartość
-    this.processFile(filePath, content);
   }
 
   private processFile(sourcePath: string, content: string): void {

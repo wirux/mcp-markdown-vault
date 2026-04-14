@@ -31,6 +31,12 @@ export class VaultIndexer {
   private watcher: FSWatcher | null = null;
 
   /** Set of vault-relative paths pending indexing. */
+  /** Callback wywoływany po pomyślnym zaindeksowaniu pliku. */
+  private onFileIndexedCb?: (relativePath: string, content: string) => void;
+  /** Callback wywoływany po usunięciu pliku z indeksu. */
+  private onFileRemovedCb?: (relativePath: string) => void;
+
+  /** Set of vault-relative paths pending indexing. */
   private readonly queue = new Set<string>();
   /** Debounce timers keyed by relative path. */
   private readonly debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -44,6 +50,16 @@ export class VaultIndexer {
     this.store = store;
     this.embedder = embedder;
     this.chunker = new MarkdownChunker(new MarkdownPipeline());
+  }
+
+  /** Rejestruje callback wywoływany po pomyślnym zaindeksowaniu pliku. */
+  setOnFileIndexed(cb: (relativePath: string, content: string) => void): void {
+    this.onFileIndexedCb = cb;
+  }
+
+  /** Rejestruje callback wywoływany po usunięciu pliku z indeksu. */
+  setOnFileRemoved(cb: (relativePath: string) => void): void {
+    this.onFileRemovedCb = cb;
   }
 
   /** Number of files currently in the offline queue. */
@@ -75,10 +91,14 @@ export class VaultIndexer {
     }
 
     await this.store.upsert({ docPath: relativePath, chunks: vectorChunks });
+
+    // Powiadom callback po pomyślnym zaindeksowaniu
+    this.onFileIndexedCb?.(relativePath, content);
   }
 
   async removeFile(relativePath: string): Promise<void> {
     await this.store.delete(relativePath);
+    this.onFileRemovedCb?.(relativePath);
   }
 
   // ── Bulk indexing ──────────────────────────────────────────────
