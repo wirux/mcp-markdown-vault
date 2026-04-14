@@ -18,6 +18,9 @@ import { GetFrontmatterUseCase, SetFrontmatterUseCase } from "../use-cases/front
 import { UpdateFileUseCase } from "../use-cases/update-file.js";
 import { DryRunEditor } from "../use-cases/dry-run-edit.js";
 import { CreateFromTemplateUseCase } from "../use-cases/create-from-template.js";
+import { BatchEditService, type EditOperation } from "../use-cases/batch-edit.js";
+import { VaultOverviewService } from "../use-cases/vault-overview.js";
+import { BacklinkIndexService } from "../use-cases/backlink-index.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
@@ -29,6 +32,7 @@ export interface McpDependencies {
   embedder: IEmbeddingProvider;
   workflow: WorkflowStateMachine;
   vaultRoot: string;
+  backlinkIndex?: BacklinkIndexService | undefined;
 }
 
 /**
@@ -115,11 +119,11 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("edit", {
     title: "Edit",
     description:
-      "Edit a note. AST operations (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform operations (line_replace/string_replace) provide fallback editing by line range or literal string. frontmatter_set merges fields into YAML frontmatter. Set dryRun=true to preview changes as a unified diff without saving.",
+      "Edit notes. Single mode: provide path, operation, content. Batch mode: provide operations array (max 50, sequential, stops on first error). AST ops (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform ops (line_replace/string_replace) for line range or literal string. frontmatter_set merges YAML. dryRun=true previews as unified diff without writing.",
     inputSchema: {
-      path: z.string(),
-      operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]),
-      content: z.string(),
+      path: z.string().optional().describe("Note path (required for single edit)."),
+      operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]).optional().describe("Edit operation (required for single edit)."),
+      content: z.string().optional().describe("Content to apply (required for single edit)."),
       heading: z.string().optional(),
       headingDepth: z.number().optional(),
       blockId: z.string().optional(),
@@ -128,9 +132,37 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       searchText: z.string().optional(),
       replaceAll: z.boolean().optional(),
       dryRun: z.boolean().optional().describe("If true, returns a preview of changes as a unified diff without saving to disk."),
+      operations: z.array(z.object({
+        path: z.string(),
+        operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]),
+        content: z.string(),
+        heading: z.string().optional(),
+        headingDepth: z.number().optional(),
+        blockId: z.string().optional(),
+        startLine: z.number().optional(),
+        endLine: z.number().optional(),
+        searchText: z.string().optional(),
+        replaceAll: z.boolean().optional(),
+      })).optional().describe("For batch mode: array of edit operations (max 50). Executed sequentially, stops on first error."),
     },
-  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun }) => {
+  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun, operations }) => {
     return wrapTool(deps.workflow, "edit", async () => {
+      // ── Tryb batch ─────────────────────────────────────────────
+      if (operations && operations.length > 0) {
+        const diffService = new UnifiedDiffService();
+        const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
+        const batchService = new BatchEditService(deps.fsAdapter, pipeline, diffService, repo);
+        return batchService.execute({
+          operations: operations as EditOperation[],
+          dryRun,
+        });
+      }
+
+      // ── Tryb pojedynczy — walidacja wymaganych pól ─────────────
+      if (!notePath) throw new Error("path is required for single edit");
+      if (!operation) throw new Error("operation is required for single edit");
+      if (content === undefined) throw new Error("content is required for single edit");
+
       const source = await deps.fsAdapter.readNote(notePath);
       const diffService = new UnifiedDiffService();
       const dryRunEditor = new DryRunEditor(deps.fsAdapter, diffService);
@@ -224,9 +256,9 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading), frontmatter_get (read YAML frontmatter), bulk_read (read multiple files/headings in one call).",
+      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading), frontmatter_get (read YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).",
     inputSchema: {
-      action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read"]),
+      action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read", "backlinks"]),
       path: z.string().optional(),
       query: z.string().optional(),
       maxChunks: z.number().optional(),
@@ -323,6 +355,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           const result = await bulkUseCase.execute({ items });
           return result;
         }
+        case "backlinks": {
+          if (!notePath) throw new Error("path is required for backlinks");
+          if (!deps.backlinkIndex) {
+            return { target: notePath, backlinks: [], count: 0 };
+          }
+          const backlinks = deps.backlinkIndex.getBacklinks(notePath);
+          return { target: notePath, backlinks, count: backlinks.length };
+        }
         default:
           throw new Error(`Unknown view action: ${String(action)}`);
       }
@@ -376,11 +416,12 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("system", {
     title: "System",
     description:
-      "System administration: check status, get indexing info, and manage the server.",
+      "System administration: check status, get indexing info, vault structure overview, and manage the server.",
     inputSchema: {
-      action: z.enum(["status", "reindex"]),
+      action: z.enum(["status", "reindex", "overview"]),
+      maxDepth: z.number().optional().describe("Maximum folder depth for overview (default 3)."),
     },
-  }, async ({ action }) => {
+  }, async ({ action, maxDepth }) => {
     return wrapTool(deps.workflow, "system", async () => {
       switch (action) {
         case "status": {
@@ -393,6 +434,10 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         }
         case "reindex": {
           return { message: "Re-indexing triggered (async)" };
+        }
+        case "overview": {
+          const overviewService = new VaultOverviewService(deps.fsAdapter);
+          return overviewService.getOverview(maxDepth);
         }
         default:
           throw new Error(`Unknown system action: ${String(action)}`);

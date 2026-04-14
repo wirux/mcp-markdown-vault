@@ -7,6 +7,8 @@ import { TransformersEmbeddingProvider } from "./infrastructure/transformers-emb
 import type { IEmbeddingProvider } from "./domain/interfaces/index.js";
 import { WorkflowStateMachine } from "./use-cases/workflow-state.js";
 import { VaultIndexer } from "./use-cases/vault-indexer.js";
+import { BacklinkIndexService } from "./use-cases/backlink-index.js";
+import { MarkdownPipeline } from "./use-cases/markdown-pipeline.js";
 import { createMcpServer } from "./presentation/mcp-tools.js";
 import {
   parseTransportType,
@@ -65,13 +67,16 @@ async function main(): Promise<void> {
   );
   const port = parseInt(process.env["PORT"] ?? "3000", 10);
 
-  // Shared dependencies (reused across all client connections)
+  // Współdzielone zależności (reużywane przez wszystkie połączenia klientów)
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
   const vectorStore = new InMemoryVectorStore();
   const embedder = await createEmbeddingProvider();
 
+  // Indeks backlinków — współdzielony między połączeniami
+  const backlinkIndex = new BacklinkIndexService(new MarkdownPipeline());
+
   // Server factory: each connection gets its own McpServer + WorkflowStateMachine.
-  // Shared deps (fs, vectors, embedder) are captured by closure.
+  // Shared deps (fs, vectors, embedder, backlinkIndex) are captured by closure.
   const serverFactory = () =>
     createMcpServer({
       fsAdapter,
@@ -79,12 +84,27 @@ async function main(): Promise<void> {
       embedder,
       workflow: new WorkflowStateMachine(),
       vaultRoot,
+      backlinkIndex,
     });
 
   // Start background indexing (shared across all connections)
   const indexer = new VaultIndexer(vaultRoot, vectorStore, embedder);
+
+  // Indeksowanie wektorowe + backlinki na starcie
   indexer
     .indexAll()
+    .then(async () => {
+      // Zbuduj indeks backlinków po zaindeksowaniu vault
+      const allFiles = await fsAdapter.listNotes();
+      const entries = await Promise.all(
+        allFiles.map(async (p) => ({
+          path: p,
+          content: await fsAdapter.readNote(p),
+        })),
+      );
+      backlinkIndex.rebuildIndex(entries);
+      console.error(`Backlink index built: ${allFiles.length} files`);
+    })
     .catch((err: unknown) =>
       console.error("Initial indexing failed:", err),
     );

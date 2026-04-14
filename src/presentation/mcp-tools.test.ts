@@ -7,6 +7,8 @@ import { LocalFileSystemAdapter } from "../infrastructure/local-fs-adapter.js";
 import { InMemoryVectorStore } from "../infrastructure/in-memory-vector-store.js";
 import { WorkflowStateMachine } from "../use-cases/workflow-state.js";
 import type { IEmbeddingProvider } from "../domain/interfaces/index.js";
+import { MarkdownPipeline } from "../use-cases/markdown-pipeline.js";
+import { BacklinkIndexService } from "../use-cases/backlink-index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
@@ -41,7 +43,7 @@ beforeEach(async () => {
   );
   await fs.writeFile(
     path.join(tmpDir, "daily/2024-01-01.md"),
-    "# Daily Note\n\nToday I learned about MCP.\n",
+    "# Daily Note\n\nToday I learned about MCP. See [[hello]].\n",
   );
 
   const fsAdapter = await LocalFileSystemAdapter.create(tmpDir);
@@ -49,7 +51,15 @@ beforeEach(async () => {
   const embedder = new FakeEmbedder();
   const workflow = new WorkflowStateMachine();
 
-  deps = { fsAdapter, vectorStore, embedder, workflow, vaultRoot: tmpDir };
+  // Indeks backlinków
+  const backlinkPipeline = new MarkdownPipeline();
+  const backlinkIndex = new BacklinkIndexService(backlinkPipeline);
+  backlinkIndex.rebuildIndex([
+    { path: "hello.md", content: "---\ntitle: Hello\n---\n\n# Hello World\n\nWelcome to the vault.\n\n## Getting Started\n\nStart here.\n" },
+    { path: "daily/2024-01-01.md", content: "# Daily Note\n\nToday I learned about MCP. See [[hello]].\n" },
+  ]);
+
+  deps = { fsAdapter, vectorStore, embedder, workflow, vaultRoot: tmpDir, backlinkIndex };
 
   const server = createMcpServer(deps);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -223,6 +233,21 @@ describe("view tool", () => {
     });
     expect(result.isError).toBe(true);
   });
+
+  it("returns backlinks for a target note", async () => {
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.target).toBe("hello.md");
+    expect(parsed.result.count).toBe(1);
+    expect(parsed.result.backlinks).toHaveLength(1);
+    expect(parsed.result.backlinks[0].sourcePath).toBe("daily/2024-01-01.md");
+    expect(parsed.result.backlinks[0].linkType).toBe("wikilink");
+  });
 });
 
 // ── edit tool ─────────────────────────────────────────────────────
@@ -318,6 +343,29 @@ describe("edit tool", () => {
     });
     expect(result.isError).toBe(true);
   });
+
+  it("executes batch edit with multiple operations", async () => {
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        operations: [
+          { path: "hello.md", operation: "append", content: "Batch line 1." },
+          { path: "daily/2024-01-01.md", operation: "append", content: "Batch line 2." },
+        ],
+      },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.totalRequested).toBe(2);
+    expect(parsed.result.totalSucceeded).toBe(2);
+    expect(parsed.result.totalFailed).toBe(0);
+
+    const file1 = await fs.readFile(path.join(tmpDir, "hello.md"), "utf-8");
+    expect(file1).toContain("Batch line 1.");
+    const file2 = await fs.readFile(path.join(tmpDir, "daily/2024-01-01.md"), "utf-8");
+    expect(file2).toContain("Batch line 2.");
+  });
 });
 
 // ── workflow tool ─────────────────────────────────────────────────
@@ -364,5 +412,27 @@ describe("system tool", () => {
     const parsed = JSON.parse(content[0]!.text);
     expect(parsed.result.vaultRoot).toBe(tmpDir);
     expect(typeof parsed.result.indexedDocuments).toBe("number");
+  });
+
+  it("returns vault overview with folder structure", async () => {
+    const result = await client.callTool({
+      name: "system",
+      arguments: { action: "overview" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.totalFiles).toBe(2);
+    expect(Array.isArray(parsed.result.folders)).toBe(true);
+
+    // hello.md jest w katalogu głównym, więc "." jest korzeniem
+    const root = parsed.result.folders.find((f: { path: string }) => f.path === ".");
+    expect(root).toBeDefined();
+    expect(root.fileCount).toBe(1);
+
+    // daily/ jest dzieckiem korzenia
+    const daily = root.children.find((f: { path: string }) => f.path === "daily");
+    expect(daily).toBeDefined();
+    expect(daily.fileCount).toBe(1);
   });
 });
