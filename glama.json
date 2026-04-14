@@ -1,9 +1,6 @@
 {
-  "name": "@wirux/mcp-markdown-vault",
-  "description": "Headless semantic MCP server for Obsidian, Logseq, Dendron and any markdown-based knowledge base",
-  "version": "1.7.1",
-  "repository": "https://github.com/Wirux/mcp-obsidian",
-  "license": "MIT",
-  "entrypoint": "npx -y @wirux/mcp-markdown-vault",
-  "dockerfile": "Dockerfile.glama"
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "wirux"
+  ]
 }
