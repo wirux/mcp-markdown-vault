@@ -12,11 +12,11 @@
 [![PR Check](https://github.com/Wirux/mcp-obsidian/actions/workflows/pr-check.yml/badge.svg)](https://github.com/Wirux/mcp-obsidian/actions/workflows/pr-check.yml)
 [![npm version](https://img.shields.io/npm/v/@wirux/mcp-markdown-vault?color=cb3837&logo=npm)](https://www.npmjs.com/package/@wirux/mcp-markdown-vault)
 [![Docker](https://img.shields.io/badge/ghcr.io-mcp--markdown--vault-blue?logo=docker)](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-markdown-vault)
-[![mcp-markdown-vault MCP server](https://glama.ai/mcp/servers/wirux/mcp-markdown-vault/badges/score.svg)](https://glama.ai/mcp/servers/wirux/mcp-markdown-vault)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/tests-342%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
+[![mcp-markdown-vault MCP server](https://glama.ai/mcp/servers/wirux/mcp-markdown-vault/badges/score.svg)](https://glama.ai/mcp/servers/wirux/mcp-markdown-vault)
 
 </div>
 
