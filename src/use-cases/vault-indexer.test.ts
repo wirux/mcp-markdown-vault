@@ -104,7 +104,7 @@ describe("VaultIndexer", () => {
   });
 
   describe("onFileIndexed callback", () => {
-    it("wywołuje callback po pomyślnym zaindeksowaniu pliku", async () => {
+    it("invokes callback after successfully indexing a file", async () => {
       const calls: Array<{ path: string; content: string }> = [];
       indexer.setOnFileIndexed((relPath, content) => {
         calls.push({ path: relPath, content });
@@ -121,7 +121,7 @@ describe("VaultIndexer", () => {
       expect(calls[0]!.content).toContain("Test content.");
     });
 
-    it("wywołuje callback onFileRemoved po usunięciu pliku", async () => {
+    it("invokes onFileRemoved callback after removing a file", async () => {
       const removedPaths: string[] = [];
       indexer.setOnFileRemoved((relPath) => {
         removedPaths.push(relPath);

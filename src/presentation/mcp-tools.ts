@@ -80,7 +80,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           if (!content) throw new Error("content is required for create");
           await deps.fsAdapter.writeNote(path, content);
           deps.backlinkIndex?.updateFile(path, content);
-          deps.indexer?.indexFile(path).catch(() => {/* tło */});
+          deps.indexer?.indexFile(path).catch(() => {/* background */});
           return `Note created: ${path}`;
         }
         case "update": {
@@ -89,14 +89,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           const useCase = new UpdateFileUseCase(deps.fsAdapter);
           const result = await useCase.execute({ path, content });
           deps.backlinkIndex?.updateFile(path, content);
-          deps.indexer?.indexFile(path).catch(() => {/* tło */});
+          deps.indexer?.indexFile(path).catch(() => {/* background */});
           return result.message;
         }
         case "delete": {
           if (!path) throw new Error("path is required for delete");
           await deps.fsAdapter.deleteNote(path);
           deps.backlinkIndex?.removeFile(path);
-          deps.indexer?.removeFile(path).catch(() => {/* tło */});
+          deps.indexer?.removeFile(path).catch(() => {/* background */});
           return `Note deleted: ${path}`;
         }
         case "stat": {
@@ -114,10 +114,10 @@ export function createMcpServer(deps: McpDependencies): McpServer {
             destinationPath: path,
             variables,
           });
-          // Zaktualizuj indeksy po utworzeniu z szablonu
+          // Update indexes after template creation
           const created = await deps.fsAdapter.readNote(path);
           deps.backlinkIndex?.updateFile(path, created);
-          deps.indexer?.indexFile(path).catch(() => {/* tło */});
+          deps.indexer?.indexFile(path).catch(() => {/* background */});
           return result.message;
         }
         default:
@@ -159,15 +159,15 @@ export function createMcpServer(deps: McpDependencies): McpServer {
     },
   }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun, operations }) => {
     return wrapTool(deps.workflow, "edit", async () => {
-      // Helper: aktualizuj indeksy po zapisie pliku
-      // Backlinki synchronicznie (wymagane dla spójności), wektory w tle
+      // Helper: update indexes after file write
+      // Backlinks synchronously (required for consistency), vectors in background
       const syncIndexes = async (filePath: string): Promise<void> => {
         const updated = await deps.fsAdapter.readNote(filePath);
         deps.backlinkIndex?.updateFile(filePath, updated);
-        deps.indexer?.indexFile(filePath).catch(() => {/* tło */});
+        deps.indexer?.indexFile(filePath).catch(() => {/* background */});
       };
 
-      // ── Tryb batch ─────────────────────────────────────────────
+      // ── Batch mode ─────────────────────────────────────────────
       if (operations && operations.length > 0) {
         const diffService = new UnifiedDiffService();
         const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
@@ -176,7 +176,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           operations: operations as EditOperation[],
           dryRun,
         });
-        // Zaktualizuj indeksy dla każdej pomyślnej operacji (nie dryRun)
+        // Update indexes for each successfully edited file (not dryRun)
         if (!dryRun) {
           const edited = new Set<string>();
           for (const op of operations as EditOperation[]) {
@@ -189,7 +189,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         return batchResult;
       }
 
-      // ── Tryb pojedynczy — walidacja wymaganych pól ─────────────
+      // ── Single mode — validate required fields ─────────────
       if (!notePath) throw new Error("path is required for single edit");
       if (!operation) throw new Error("operation is required for single edit");
       if (content === undefined) throw new Error("content is required for single edit");
@@ -198,7 +198,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       const diffService = new UnifiedDiffService();
       const dryRunEditor = new DryRunEditor(deps.fsAdapter, diffService);
 
-      // Helper: wykonaj edycję i zaktualizuj indeksy jeśli nie dryRun
+      // Helper: finalize edit and update indexes if not dryRun
       const executeEdit = async (editResult: unknown): Promise<unknown> => {
         if (!(dryRun ?? false)) {
           await syncIndexes(notePath);
@@ -478,7 +478,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         }
         case "reindex": {
           if (deps.indexer) {
-            // Uruchom reindeksację asynchronicznie (nie blokuj odpowiedzi)
+            // Run re-indexing asynchronously (don't block the response)
             deps.indexer.indexAll()
               .then(async () => {
                 if (deps.backlinkIndex) {

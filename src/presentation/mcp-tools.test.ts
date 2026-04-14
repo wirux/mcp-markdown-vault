@@ -51,7 +51,7 @@ beforeEach(async () => {
   const embedder = new FakeEmbedder();
   const workflow = new WorkflowStateMachine();
 
-  // Indeks backlinków
+  // Backlink index
   const backlinkPipeline = new MarkdownPipeline();
   const backlinkIndex = new BacklinkIndexService(backlinkPipeline);
   backlinkIndex.rebuildIndex([
@@ -403,7 +403,7 @@ describe("workflow tool", () => {
 // ── backlink live updates ─────────────────────────────────────────
 
 describe("backlink index — live updates via MCP operations", () => {
-  it("vault.create aktualizuje indeks backlinków", async () => {
+  it("vault.create updates backlink index", async () => {
     await client.callTool({
       name: "vault",
       arguments: {
@@ -419,14 +419,14 @@ describe("backlink index — live updates via MCP operations", () => {
     });
     const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
 
-    // daily/2024-01-01.md (z beforeEach) + linker.md (nowo utworzony)
+    // daily/2024-01-01.md (from beforeEach) + linker.md (newly created)
     expect(parsed.result.count).toBe(2);
     const sources = parsed.result.backlinks.map((b: { sourcePath: string }) => b.sourcePath).sort();
     expect(sources).toContain("linker.md");
   });
 
-  it("vault.delete usuwa wpisy backlinków z tego źródła", async () => {
-    // Najpierw upewnij się, że daily/2024-01-01.md jest źródłem backlinku
+  it("vault.delete removes backlink entries from that source", async () => {
+    // First verify that daily/2024-01-01.md is a backlink source
     const before = await client.callTool({
       name: "view",
       arguments: { action: "backlinks", path: "hello.md" },
@@ -434,7 +434,7 @@ describe("backlink index — live updates via MCP operations", () => {
     const beforeParsed = JSON.parse((before.content as Array<{ type: string; text: string }>)[0]!.text);
     expect(beforeParsed.result.count).toBe(1);
 
-    // Usuń plik będący źródłem linku
+    // Delete the file that is a link source
     await client.callTool({
       name: "vault",
       arguments: { action: "delete", path: "daily/2024-01-01.md" },
@@ -448,8 +448,8 @@ describe("backlink index — live updates via MCP operations", () => {
     expect(afterParsed.result.count).toBe(0);
   });
 
-  it("edit.string_replace aktualizuje indeks backlinków", async () => {
-    // Utwórz cel linkowania
+  it("edit.string_replace updates backlink index", async () => {
+    // Create the link target
     await client.callTool({
       name: "vault",
       arguments: {
@@ -459,7 +459,7 @@ describe("backlink index — live updates via MCP operations", () => {
       },
     });
 
-    // Zamień tekst dodając link (string_replace nie przechodzi przez AST, więc zachowuje wikilinki)
+    // Replace text adding a link (string_replace bypasses AST, so wikilinks are preserved)
     const editResult = await client.callTool({
       name: "edit",
       arguments: {
@@ -480,20 +480,20 @@ describe("backlink index — live updates via MCP operations", () => {
     expect(parsed.result.backlinks[0].sourcePath).toBe("hello.md");
   });
 
-  it("pełna sekwencja: create → backlinks → delete → backlinks", async () => {
-    // 1. Utwórz cel
+  it("full sequence: create → backlinks → delete → backlinks", async () => {
+    // 1. Create target
     await client.callTool({
       name: "vault",
       arguments: { action: "create", path: "target.md", content: "# Target\n" },
     });
 
-    // 2. Utwórz plik linkujący
+    // 2. Create a linking file
     await client.callTool({
       name: "vault",
       arguments: { action: "create", path: "linker.md", content: "See [[target]]\n" },
     });
 
-    // 3. Sprawdź backlinki — powinien być 1
+    // 3. Check backlinks — should be 1
     const mid = await client.callTool({
       name: "view",
       arguments: { action: "backlinks", path: "target.md" },
@@ -501,13 +501,13 @@ describe("backlink index — live updates via MCP operations", () => {
     const midParsed = JSON.parse((mid.content as Array<{ type: string; text: string }>)[0]!.text);
     expect(midParsed.result.count).toBe(1);
 
-    // 4. Usuń plik linkujący
+    // 4. Delete the linking file
     await client.callTool({
       name: "vault",
       arguments: { action: "delete", path: "linker.md" },
     });
 
-    // 5. Sprawdź backlinki — powinien być 0
+    // 5. Check backlinks — should be 0
     const end = await client.callTool({
       name: "view",
       arguments: { action: "backlinks", path: "target.md" },
@@ -544,12 +544,12 @@ describe("system tool", () => {
     expect(parsed.result.totalFiles).toBe(2);
     expect(Array.isArray(parsed.result.folders)).toBe(true);
 
-    // hello.md jest w katalogu głównym, więc "." jest korzeniem
+    // hello.md is in the root directory, so "." is the root
     const root = parsed.result.folders.find((f: { path: string }) => f.path === ".");
     expect(root).toBeDefined();
     expect(root.fileCount).toBe(1);
 
-    // daily/ jest dzieckiem korzenia
+    // daily/ is a child of the root
     const daily = root.children.find((f: { path: string }) => f.path === "daily");
     expect(daily).toBeDefined();
     expect(daily.fileCount).toBe(1);

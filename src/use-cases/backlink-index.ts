@@ -4,7 +4,7 @@ import type { IBacklinkIndex, BacklinkEntry } from "../domain/interfaces/backlin
 import type { MarkdownPipeline } from "./markdown-pipeline.js";
 import { WikilinkResolver } from "./wikilink-resolver.js";
 
-// Klucz mapy to znormalizowana ścieżka: lowercase, bez rozszerzenia .md
+// Map key is the normalized path: lowercase, without .md extension
 function normalizeKey(filePath: string): string {
   const withoutExt = filePath.endsWith(".md")
     ? filePath.slice(0, -3)
@@ -12,7 +12,7 @@ function normalizeKey(filePath: string): string {
   return withoutExt.toLowerCase();
 }
 
-// Numer linii na podstawie pozycji (offset) w tekście
+// Line number based on character offset in the text
 function lineAtOffset(content: string, offset: number): number {
   let line = 1;
   for (let i = 0; i < offset && i < content.length; i++) {
@@ -21,7 +21,7 @@ function lineAtOffset(content: string, offset: number): number {
   return line;
 }
 
-// Fragment kontekstowy ±30 znaków wokół pozycji
+// Context snippet ±30 characters around the position
 function extractContext(
   content: string,
   offset: number,
@@ -32,12 +32,12 @@ function extractContext(
   return content.slice(start, end).replace(/\n/g, " ");
 }
 
-// Sprawdza czy URL jest zewnętrzny (http, mailto, itp.)
+// Checks if a URL is external (http, mailto, etc.)
 function isExternalUrl(url: string): boolean {
   return /^[a-z]+:\/\//i.test(url) || url.startsWith("mailto:") || url.startsWith("#");
 }
 
-// Rozwiązuje relatywny link markdown na ścieżkę vault-relative
+// Resolves a relative markdown link to a vault-relative path
 function resolveRelativeLink(sourcePath: string, url: string): string {
   const cleanUrl = url.split("#")[0]!.split("?")[0]!;
   if (!cleanUrl) return "";
@@ -45,7 +45,7 @@ function resolveRelativeLink(sourcePath: string, url: string): string {
   return path.posix.normalize(path.posix.join(dir, cleanUrl));
 }
 
-// Rekurencyjne szukanie węzłów danego typu w drzewie AST
+// Recursively find nodes of a given type in the AST tree
 interface LinkNode {
   type: "link";
   url: string;
@@ -66,7 +66,7 @@ function findLinkNodes(node: unknown): LinkNode[] {
   return results;
 }
 
-// Wyodrębnia wikilinki z pozycjami w tekście
+// Extracts wikilinks with their positions in the text
 interface WikilinkMatch {
   target: string;
   index: number;
@@ -88,8 +88,8 @@ function extractWikilinksWithPositions(content: string): WikilinkMatch[] {
 }
 
 /**
- * Usługa indeksująca backlinki w vault.
- * Przechowuje mapę: znormalizowana ścieżka docelowa → lista wpisów BacklinkEntry.
+ * Service that indexes backlinks in the vault.
+ * Stores a map: normalized target path → list of BacklinkEntry records.
  */
 export class BacklinkIndexService implements IBacklinkIndex {
   private readonly index = new Map<string, BacklinkEntry[]>();
@@ -97,7 +97,7 @@ export class BacklinkIndexService implements IBacklinkIndex {
 
   constructor(private readonly pipeline: MarkdownPipeline) {}
 
-  /** Liczba unikalnych celów śledzonych w indeksie. */
+  /** Number of unique targets tracked in the index. */
   get indexSize(): number {
     return this.index.size;
   }
@@ -116,13 +116,13 @@ export class BacklinkIndexService implements IBacklinkIndex {
   }
 
   updateFile(filePath: string, content: string): void {
-    // Usuń stare wpisy i dodaj nowe
+    // Remove old entries and add new ones
     this.removeFile(filePath);
     this.processFile(filePath, content);
   }
 
   removeFile(filePath: string): void {
-    // Usuń wszystkie wpisy gdzie sourcePath === filePath
+    // Remove all entries where sourcePath === filePath
     for (const [key, entries] of this.index) {
       const filtered = entries.filter((e) => e.sourcePath !== filePath);
       if (filtered.length === 0) {
@@ -136,14 +136,14 @@ export class BacklinkIndexService implements IBacklinkIndex {
   private processFile(sourcePath: string, content: string): void {
     const sourceKey = normalizeKey(sourcePath);
 
-    // Wyodrębnij wikilinki
+    // Extract wikilinks
     const wikilinks = extractWikilinksWithPositions(content);
     for (const wl of wikilinks) {
       const resolved = this.resolver?.resolve(wl.target);
       const targetPath = resolved ?? `${wl.target}.md`;
       const targetKey = normalizeKey(targetPath);
 
-      // Pomiń self-linki
+      // Skip self-links
       if (targetKey === sourceKey) continue;
 
       this.addEntry(targetKey, {
@@ -154,7 +154,7 @@ export class BacklinkIndexService implements IBacklinkIndex {
       });
     }
 
-    // Wyodrębnij linki markdown z AST
+    // Extract markdown links from AST
     const tree: Root = this.pipeline.parse(content);
     const linkNodes = findLinkNodes(tree);
     for (const node of linkNodes) {

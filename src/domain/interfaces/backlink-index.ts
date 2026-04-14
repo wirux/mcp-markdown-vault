@@ -1,4 +1,4 @@
-/** Wpis backlinku — informacja o jednym linku prowadzącym do pliku docelowego. */
+/** Backlink entry — information about a single link pointing to a target file. */
 export interface BacklinkEntry {
   sourcePath: string;
   lineNumber: number;
@@ -6,17 +6,17 @@ export interface BacklinkEntry {
   linkType: "wikilink" | "markdown_link";
 }
 
-/** Port dla indeksu backlinków. */
+/** Port for the backlink index. */
 export interface IBacklinkIndex {
-  /** Zwraca backlinki prowadzące do podanej ścieżki docelowej. */
+  /** Returns backlinks pointing to the given target path. */
   getBacklinks(targetPath: string): BacklinkEntry[];
 
-  /** Przebudowuje cały indeks z podanych plików. */
+  /** Rebuilds the entire index from the given files. */
   rebuildIndex(entries: Array<{ path: string; content: string }>): void;
 
-  /** Aktualizuje indeks dla pojedynczego pliku (usuwa stare wpisy i dodaje nowe). */
+  /** Updates the index for a single file (removes old entries and adds new ones). */
   updateFile(path: string, content: string): void;
 
-  /** Usuwa wszystkie wpisy backlinków gdzie plik jest źródłem linku. */
+  /** Removes all backlink entries where the file is a link source. */
   removeFile(path: string): void;
 }

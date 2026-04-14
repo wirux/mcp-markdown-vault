@@ -1,4 +1,4 @@
-/** Podsumowanie pojedynczego katalogu w vault. */
+/** Summary of a single directory in the vault. */
 export interface FolderSummary {
   path: string;
   fileCount: number;
@@ -6,13 +6,13 @@ export interface FolderSummary {
   children: FolderSummary[];
 }
 
-/** Przegląd struktury vault. */
+/** Overview of the vault structure. */
 export interface VaultOverview {
   totalFiles: number;
   folders: FolderSummary[];
 }
 
-/** Port dla usługi przeglądu vault. */
+/** Port for the vault overview service. */
 export interface IVaultOverviewService {
   getOverview(maxDepth?: number): Promise<VaultOverview>;
 }

@@ -9,12 +9,12 @@ beforeEach(() => {
 });
 
 describe("BacklinkIndexService", () => {
-  it("zwraca pusty wynik dla pustego indeksu", () => {
+  it("returns empty result for an empty index", () => {
     const result = service.getBacklinks("any.md");
     expect(result).toEqual([]);
   });
 
-  it("indeksuje wikilink [[B]] — backlink typu wikilink", () => {
+  it("indexes wikilink [[B]] — wikilink type backlink", () => {
     service.rebuildIndex([
       { path: "a.md", content: "# A\n\nSee [[B]].\n" },
       { path: "b.md", content: "# B\n" },
@@ -26,7 +26,7 @@ describe("BacklinkIndexService", () => {
     expect(backlinks[0]!.linkType).toBe("wikilink");
   });
 
-  it("indeksuje markdown link [text](B.md) — backlink typu markdown_link", () => {
+  it("indexes markdown link [text](B.md) — markdown_link type backlink", () => {
     service.rebuildIndex([
       { path: "a.md", content: "# A\n\nSee [B doc](b.md).\n" },
       { path: "b.md", content: "# B\n" },
@@ -38,7 +38,7 @@ describe("BacklinkIndexService", () => {
     expect(backlinks[0]!.linkType).toBe("markdown_link");
   });
 
-  it("wiele plików linkujących do tego samego celu", () => {
+  it("multiple files linking to the same target", () => {
     service.rebuildIndex([
       { path: "a.md", content: "Link to [[C]].\n" },
       { path: "b.md", content: "Also links to [[C]].\n" },
@@ -51,7 +51,7 @@ describe("BacklinkIndexService", () => {
     expect(sources).toEqual(["a.md", "b.md"]);
   });
 
-  it("rozwiązuje wikilink po nazwie pliku", () => {
+  it("resolves wikilink by filename", () => {
     service.rebuildIndex([
       { path: "a.md", content: "See [[Note Title]].\n" },
       { path: "folder/Note Title.md", content: "# Note Title\n" },
@@ -63,7 +63,7 @@ describe("BacklinkIndexService", () => {
     expect(backlinks[0]!.linkType).toBe("wikilink");
   });
 
-  it("updateFile zastępuje stare wpisy dla tego źródła", () => {
+  it("updateFile replaces old entries for the source", () => {
     service.rebuildIndex([
       { path: "a.md", content: "See [[B]].\n" },
       { path: "b.md", content: "# B\n" },
@@ -73,14 +73,14 @@ describe("BacklinkIndexService", () => {
     expect(service.getBacklinks("b.md")).toHaveLength(1);
     expect(service.getBacklinks("c.md")).toHaveLength(0);
 
-    // Zmień a.md — teraz linkuje do C zamiast B
+    // Change a.md — now links to C instead of B
     service.updateFile("a.md", "Now see [[C]].\n");
 
     expect(service.getBacklinks("b.md")).toHaveLength(0);
     expect(service.getBacklinks("c.md")).toHaveLength(1);
   });
 
-  it("poprawnie wyodrębnia numer linii i kontekst", () => {
+  it("correctly extracts line number and context", () => {
     service.rebuildIndex([
       { path: "a.md", content: "# Title\n\nFirst paragraph.\n\nSee [[B]] for details.\n" },
       { path: "b.md", content: "# B\n" },
@@ -92,7 +92,7 @@ describe("BacklinkIndexService", () => {
     expect(backlinks[0]!.context).toContain("[[B]]");
   });
 
-  it("pomija self-linki", () => {
+  it("skips self-links", () => {
     service.rebuildIndex([
       { path: "a.md", content: "# A\n\nSee [[A]] and [self](a.md).\n" },
     ]);
@@ -101,7 +101,7 @@ describe("BacklinkIndexService", () => {
     expect(backlinks).toHaveLength(0);
   });
 
-  it("removeFile usuwa wpisy backlinków z tego źródła", () => {
+  it("removeFile removes backlink entries from that source", () => {
     service.rebuildIndex([
       { path: "a.md", content: "See [[C]].\n" },
       { path: "b.md", content: "Also [[C]].\n" },
@@ -117,15 +117,15 @@ describe("BacklinkIndexService", () => {
     expect(remaining[0]!.sourcePath).toBe("b.md");
   });
 
-  it("normalizacja celu niezależna od wielkości liter", () => {
+  it("target normalization is case-insensitive", () => {
     service.rebuildIndex([
       { path: "a.md", content: "See [[B]].\n" },
       { path: "B.md", content: "# B\n" },
     ]);
 
-    // Zapytanie z wielką literą
+    // Query with uppercase
     expect(service.getBacklinks("B.md")).toHaveLength(1);
-    // Zapytanie z małą literą
+    // Query with lowercase
     expect(service.getBacklinks("b.md")).toHaveLength(1);
   });
 });

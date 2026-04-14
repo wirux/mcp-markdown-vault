@@ -36,7 +36,7 @@ afterEach(async () => {
 });
 
 describe("BatchEditService", () => {
-  it("zwraca puste wyniki dla pustej tablicy operacji", async () => {
+  it("returns empty results for an empty operations array", async () => {
     const result = await service.execute({ operations: [] });
 
     expect(result.totalRequested).toBe(0);
@@ -46,7 +46,7 @@ describe("BatchEditService", () => {
     expect(result.stoppedAtIndex).toBeUndefined();
   });
 
-  it("wykonuje wszystkie operacje pomyślnie", async () => {
+  it("executes all operations successfully", async () => {
     const operations: EditOperation[] = [
       { path: "note1.md", operation: "append", content: "Appended 1.", heading: "Section A", headingDepth: 2 },
       { path: "note2.md", operation: "append", content: "Appended 2." },
@@ -62,18 +62,18 @@ describe("BatchEditService", () => {
     expect(result.results[0]!.status).toBe("success");
     expect(result.results[1]!.status).toBe("success");
 
-    // Sprawdź pliki na dysku
+    // Verify files on disk
     const content1 = await fs.readFile(path.join(tmpDir, "note1.md"), "utf-8");
     expect(content1).toContain("Appended 1.");
     const content2 = await fs.readFile(path.join(tmpDir, "note2.md"), "utf-8");
     expect(content2).toContain("Appended 2.");
   });
 
-  it("zatrzymuje się na pierwszym błędzie i zwraca częściowe wyniki", async () => {
+  it("stops on first error and returns partial results", async () => {
     const operations: EditOperation[] = [
       { path: "note1.md", operation: "append", content: "OK." },
       { path: "nonexistent.md", operation: "append", content: "Fail." },
-      { path: "note2.md", operation: "append", content: "Nigdy." },
+      { path: "note2.md", operation: "append", content: "Never." },
     ];
 
     const result = await service.execute({ operations });
@@ -87,12 +87,12 @@ describe("BatchEditService", () => {
     expect(result.results[1]!.status).toBe("error");
     expect(result.results[1]!.error).toBeDefined();
 
-    // Trzecia operacja nie powinna być próbowana
+    // Third operation should not have been attempted
     const content2 = await fs.readFile(path.join(tmpDir, "note2.md"), "utf-8");
-    expect(content2).not.toContain("Nigdy.");
+    expect(content2).not.toContain("Never.");
   });
 
-  it("dryRun generuje diffy bez zapisu na dysk", async () => {
+  it("dryRun generates diffs without writing to disk", async () => {
     const original = await fs.readFile(path.join(tmpDir, "note1.md"), "utf-8");
 
     const operations: EditOperation[] = [
@@ -106,12 +106,12 @@ describe("BatchEditService", () => {
     expect(result.results[0]!.diff).toBeDefined();
     expect(result.results[0]!.diff).toContain("DryRun content.");
 
-    // Plik nie powinien się zmienić
+    // File should not have changed
     const afterContent = await fs.readFile(path.join(tmpDir, "note1.md"), "utf-8");
     expect(afterContent).toBe(original);
   });
 
-  it("obsługuje mieszane typy operacji", async () => {
+  it("handles mixed operation types", async () => {
     const operations: EditOperation[] = [
       { path: "note1.md", operation: "append", content: "Added.", heading: "Section A", headingDepth: 2 },
       { path: "note2.md", operation: "string_replace", content: "Replaced text.", searchText: "Some text here." },
@@ -130,7 +130,7 @@ describe("BatchEditService", () => {
     expect(content2).not.toContain("Some text here.");
   });
 
-  it("łapie naruszenie SafePath", async () => {
+  it("catches SafePath violation", async () => {
     const operations: EditOperation[] = [
       { path: "../../etc/passwd", operation: "append", content: "Hack." },
     ];
@@ -142,7 +142,7 @@ describe("BatchEditService", () => {
     expect(result.results[0]!.error).toBeDefined();
   });
 
-  it("odrzuca operacje przekraczające limit", async () => {
+  it("rejects operations exceeding the limit", async () => {
     const operations: EditOperation[] = Array.from({ length: 51 }, (_, i) => ({
       path: "note1.md",
       operation: "append" as const,

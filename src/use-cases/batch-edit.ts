@@ -26,13 +26,13 @@ export interface EditOperation {
   replaceAll?: boolean | undefined;
 }
 
-/** Żądanie batch edit. */
+/** Batch edit request. */
 export interface BatchEditRequest {
   operations: EditOperation[];
   dryRun?: boolean | undefined;
 }
 
-/** Wynik pojedynczej operacji. */
+/** Result of a single operation. */
 export interface BatchEditResult {
   index: number;
   path: string;
@@ -42,7 +42,7 @@ export interface BatchEditResult {
   error?: string | undefined;
 }
 
-/** Odpowiedź batch edit. */
+/** Batch edit response. */
 export interface BatchEditResponse {
   results: BatchEditResult[];
   totalRequested: number;
@@ -52,9 +52,9 @@ export interface BatchEditResponse {
 }
 
 /**
- * Usługa wykonująca wiele operacji edycji sekwencyjnie.
- * Zatrzymuje się na pierwszym błędzie.
- * Deleguje do tych samych use-case'ów co pojedyncze edycje.
+ * Service that executes multiple edit operations sequentially.
+ * Stops on first error.
+ * Delegates to the same use cases as single edits.
  */
 export class BatchEditService {
   private readonly dryRunEditor: DryRunEditor;
@@ -125,7 +125,7 @@ export class BatchEditService {
     };
   }
 
-  // Wykonanie pojedynczej operacji — deleguje do istniejących use-case'ów
+  // Execute a single operation — delegates to existing use cases
   private async executeSingle(
     op: EditOperation,
     dryRun: boolean,

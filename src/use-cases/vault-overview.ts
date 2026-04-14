@@ -5,7 +5,7 @@ import type {
   FolderSummary,
 } from "../domain/interfaces/vault-overview-service.js";
 
-// Wzorce katalogów do pominięcia
+// Directory patterns to skip
 const HIDDEN_SEGMENT_RE = /^\./;
 const IGNORED_SEGMENTS = new Set(["node_modules"]);
 
@@ -17,8 +17,8 @@ function isHiddenPath(filePath: string): boolean {
 }
 
 /**
- * Usługa budująca przegląd struktury vault.
- * Korzysta z IFileSystemAdapter do odczytu listy plików i metadanych.
+ * Service that builds an overview of the vault structure.
+ * Uses IFileSystemAdapter to read file lists and metadata.
  */
 export class VaultOverviewService implements IVaultOverviewService {
   constructor(private readonly fsAdapter: IFileSystemAdapter) {}
@@ -27,14 +27,14 @@ export class VaultOverviewService implements IVaultOverviewService {
     const depth = maxDepth ?? 3;
     const allFiles = await this.fsAdapter.listNotes();
 
-    // Odfiltruj pliki z ukrytych katalogów
+    // Filter out files from hidden directories
     const files = allFiles.filter((f) => !isHiddenPath(f));
 
     if (files.length === 0) {
       return { totalFiles: 0, folders: [] };
     }
 
-    // Pobierz daty modyfikacji wszystkich plików
+    // Fetch modification dates for all files
     const statsMap = new Map<string, string>();
     await Promise.all(
       files.map(async (f) => {
@@ -43,7 +43,7 @@ export class VaultOverviewService implements IVaultOverviewService {
       }),
     );
 
-    // Pogrupuj pliki po katalogu nadrzędnym
+    // Group files by parent directory
     const dirFiles = new Map<string, string[]>();
     for (const file of files) {
       const parts = file.split("/");
@@ -52,7 +52,7 @@ export class VaultOverviewService implements IVaultOverviewService {
       dirFiles.get(dir)!.push(file);
     }
 
-    // Zbierz wszystkie unikalne ścieżki katalogów (w granicach głębokości)
+    // Collect all unique directory paths (within depth limit)
     const allDirs = new Set<string>();
     for (const file of files) {
       const parts = file.split("/");
@@ -68,7 +68,7 @@ export class VaultOverviewService implements IVaultOverviewService {
       }
     }
 
-    // Zbuduj obiekty FolderSummary
+    // Build FolderSummary objects
     const folderMap = new Map<string, FolderSummary>();
     for (const dir of allDirs) {
       const directFiles = dirFiles.get(dir) ?? [];
@@ -88,7 +88,7 @@ export class VaultOverviewService implements IVaultOverviewService {
       });
     }
 
-    // Zbuduj drzewo — przypisz dzieci do rodziców
+    // Build tree — assign children to parents
     const roots: FolderSummary[] = [];
     for (const [dirPath, summary] of folderMap) {
       if (dirPath === ".") {

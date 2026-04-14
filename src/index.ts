@@ -67,18 +67,18 @@ async function main(): Promise<void> {
   );
   const port = parseInt(process.env["PORT"] ?? "3000", 10);
 
-  // Współdzielone zależności (reużywane przez wszystkie połączenia klientów)
+  // Shared dependencies (reused across all client connections)
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
   const vectorStore = new InMemoryVectorStore();
   const embedder = await createEmbeddingProvider();
 
-  // Indeks backlinków — współdzielony między połączeniami
+  // Backlink index — shared across connections
   const backlinkIndex = new BacklinkIndexService(new MarkdownPipeline());
 
   // Start background indexing (shared across all connections)
   const indexer = new VaultIndexer(vaultRoot, vectorStore, embedder);
 
-  // Podłącz callbacki watchera do indeksu backlinków
+  // Wire watcher callbacks to backlink index
   indexer.setOnFileIndexed((relPath, content) => {
     backlinkIndex.updateFile(relPath, content);
   });
@@ -99,11 +99,11 @@ async function main(): Promise<void> {
       indexer,
     });
 
-  // Indeksowanie wektorowe + backlinki na starcie
+  // Vector indexing + backlinks on startup
   indexer
     .indexAll()
     .then(async () => {
-      // Zbuduj indeks backlinków po zaindeksowaniu vault
+      // Build backlink index after vault indexing completes
       const allFiles = await fsAdapter.listNotes();
       const entries = await Promise.all(
         allFiles.map(async (p) => ({

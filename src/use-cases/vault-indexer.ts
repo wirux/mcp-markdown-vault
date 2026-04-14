@@ -31,9 +31,9 @@ export class VaultIndexer {
   private watcher: FSWatcher | null = null;
 
   /** Set of vault-relative paths pending indexing. */
-  /** Callback wywoływany po pomyślnym zaindeksowaniu pliku. */
+  /** Callback invoked after a file is successfully indexed. */
   private onFileIndexedCb?: (relativePath: string, content: string) => void;
-  /** Callback wywoływany po usunięciu pliku z indeksu. */
+  /** Callback invoked after a file is removed from the index. */
   private onFileRemovedCb?: (relativePath: string) => void;
 
   /** Set of vault-relative paths pending indexing. */
@@ -52,12 +52,12 @@ export class VaultIndexer {
     this.chunker = new MarkdownChunker(new MarkdownPipeline());
   }
 
-  /** Rejestruje callback wywoływany po pomyślnym zaindeksowaniu pliku. */
+  /** Registers a callback invoked after a file is successfully indexed. */
   setOnFileIndexed(cb: (relativePath: string, content: string) => void): void {
     this.onFileIndexedCb = cb;
   }
 
-  /** Rejestruje callback wywoływany po usunięciu pliku z indeksu. */
+  /** Registers a callback invoked after a file is removed from the index. */
   setOnFileRemoved(cb: (relativePath: string) => void): void {
     this.onFileRemovedCb = cb;
   }
@@ -92,7 +92,7 @@ export class VaultIndexer {
 
     await this.store.upsert({ docPath: relativePath, chunks: vectorChunks });
 
-    // Powiadom callback po pomyślnym zaindeksowaniu
+    // Notify callback after successful indexing
     this.onFileIndexedCb?.(relativePath, content);
   }
 
