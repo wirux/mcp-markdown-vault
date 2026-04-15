@@ -75,6 +75,7 @@ All file operations route through `SafePath` value object — prevents path trav
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings; if unset, local embeddings are used |
 | `OLLAMA_MODEL` | `nomic-embed-text` | Ollama embedding model name |
 | `OLLAMA_DIMENSIONS` | `768` | Ollama embedding vector dimensions |
+| `VECTOR_STORE_URL` | *(unset)* | Set to use Qdrant (e.g. `http://localhost:6333`). If unset, local persisted flat store is used. |
 
 ## Conventions
 
