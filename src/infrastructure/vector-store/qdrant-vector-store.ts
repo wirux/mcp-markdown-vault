@@ -17,15 +17,17 @@ export class QdrantVectorStoreError extends DomainError {
 
 export class QdrantVectorStore implements IVectorStore {
   private client: QdrantClient;
-  private readonly collectionName = "markdown_vault";
+  private readonly collectionName: string;
   private initialized = false;
   private initPromise: Promise<void> | null = null;
 
   constructor(
     qdrantUrl: string,
-    private readonly dimensions: number
+    private readonly dimensions: number,
+    collectionName = "markdown_vault"
   ) {
     this.client = new QdrantClient({ url: qdrantUrl });
+    this.collectionName = collectionName;
   }
 
   private async initialize(): Promise<void> {
@@ -58,6 +60,7 @@ export class QdrantVectorStore implements IVectorStore {
         }
         this.initialized = true;
       } catch (error: any) {
+        this.initPromise = null;
         if (error instanceof QdrantVectorStoreError) {
           throw error;
         }
@@ -176,7 +179,6 @@ export class QdrantVectorStore implements IVectorStore {
     }
   }
 
-  // To satisfy interface expectation for index.ts saving (though it handles persistence itself)
   async save(): Promise<void> {
     // Qdrant persists automatically
   }

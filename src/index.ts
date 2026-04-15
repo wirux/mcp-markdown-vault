@@ -133,9 +133,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     await indexer.stop();
     await handle.shutdown();
-    if ("save" in vectorStore && typeof vectorStore.save === "function") {
-      await (vectorStore as any).save();
-    }
+    await vectorStore.save();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
@@ -143,9 +141,7 @@ async function main(): Promise<void> {
 
   // Periodic flush every 60 seconds
   setInterval(async () => {
-    if ("save" in vectorStore && typeof vectorStore.save === "function") {
-      await (vectorStore as any).save().catch(console.error);
-    }
+    await vectorStore.save().catch(console.error);
   }, 60_000).unref();
 }
 
