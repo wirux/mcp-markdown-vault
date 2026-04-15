@@ -4,6 +4,11 @@ import { LocalFileSystemAdapter } from "./infrastructure/local-fs-adapter.js";
 import { createVectorStore } from "./infrastructure/vector-store-factory.js";
 import { OllamaEmbeddingProvider } from "./infrastructure/ollama-embedding.js";
 import { TransformersEmbeddingProvider } from "./infrastructure/transformers-embedding.js";
+import {
+  validateOllama,
+  validateVectorStore,
+  StartupError,
+} from "./infrastructure/startup-checks.js";
 import type { IEmbeddingProvider } from "./domain/interfaces/index.js";
 import { WorkflowStateMachine } from "./use-cases/workflow-state.js";
 import { VaultIndexer } from "./use-cases/vault-indexer.js";
@@ -66,11 +71,37 @@ async function main(): Promise<void> {
     process.env["MCP_TRANSPORT_TYPE"],
   );
   const port = parseInt(process.env["PORT"] ?? "3000", 10);
+  const ollamaUrl = process.env["OLLAMA_URL"];
+  const ollamaModel = process.env["OLLAMA_MODEL"] ?? "nomic-embed-text";
+  const qdrantUrl = process.env["VECTOR_STORE_URL"];
+  const qdrantCollection =
+    process.env["VECTOR_STORE_COLLECTION"] ?? "markdown_vault";
+  const allowReset = process.env["VECTOR_STORE_RESET"] === "true";
 
   // Shared dependencies (reused across all client connections)
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
+
+  // ── Startup health checks ──────────────────────────────────────
+  if (ollamaUrl !== undefined) {
+    await validateOllama(ollamaUrl, ollamaModel);
+  }
+
   const embedder = await createEmbeddingProvider();
-  const vectorStore = await createVectorStore(vaultRoot, embedder.modelName, embedder.dimensions);
+
+  await validateVectorStore({
+    qdrantUrl,
+    qdrantCollection,
+    vaultPath: vaultRoot,
+    expectedDimensions: embedder.dimensions,
+    expectedModel: embedder.modelName,
+    allowReset,
+  });
+
+  const vectorStore = await createVectorStore(
+    vaultRoot,
+    embedder.modelName,
+    embedder.dimensions,
+  );
 
   // Backlink index — shared across connections
   const backlinkIndex = new BacklinkIndexService(new MarkdownPipeline());
@@ -146,6 +177,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("Fatal:", err);
+  if (err instanceof StartupError) {
+    console.error(`\nStartup check failed: ${err.message}`);
+    console.error(`  → ${err.hint}\n`);
+  } else {
+    console.error("Fatal:", err);
+  }
   process.exit(1);
 });
