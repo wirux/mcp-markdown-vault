@@ -30,6 +30,7 @@ export class PersistedFlatVectorStore implements IVectorStore {
   private readonly storeDir: string;
   private readonly indexFile: string;
   private readonly vectorsFile: string;
+  private saving = false;
 
   constructor(
     vaultPath: string,
@@ -57,22 +58,30 @@ export class PersistedFlatVectorStore implements IVectorStore {
       }
 
       const vectorsBuffer = await fs.readFile(this.vectorsFile);
-      
+
+      const expectedBytes = meta.chunks.length * this.dimensions * 4;
+      if (vectorsBuffer.byteLength < expectedBytes) {
+        console.warn(
+          `[PersistedFlatVectorStore] vectors.bin too small (${vectorsBuffer.byteLength} < ${expectedBytes}), starting fresh`
+        );
+        return;
+      }
+
       this.docs.clear();
       for (const chunk of meta.chunks) {
         const offset = chunk.chunkIndex * this.dimensions * 4;
-        const vectorBuf = vectorsBuffer.buffer.slice(
-          vectorsBuffer.byteOffset + offset,
-          vectorsBuffer.byteOffset + offset + this.dimensions * 4
-        );
-        const vector = new Float32Array(vectorBuf);
-        
+        // Copy bytes out of Node's Buffer pool into a standalone ArrayBuffer
+        const vector = new Float32Array(this.dimensions);
+        for (let i = 0; i < this.dimensions; i++) {
+          vector[i] = vectorsBuffer.readFloatLE(offset + i * 4);
+        }
+
         let fileChunks = this.docs.get(chunk.docPath);
         if (!fileChunks) {
           fileChunks = [];
           this.docs.set(chunk.docPath, fileChunks);
         }
-        
+
         fileChunks.push({
           ...chunk,
           vector,
@@ -88,6 +97,8 @@ export class PersistedFlatVectorStore implements IVectorStore {
   }
 
   async save(): Promise<void> {
+    if (this.saving) return;
+    this.saving = true;
     try {
       await fs.mkdir(this.storeDir, { recursive: true });
 
@@ -132,6 +143,8 @@ export class PersistedFlatVectorStore implements IVectorStore {
       await fs.rename(indexTmp, this.indexFile);
     } catch (err) {
       console.error(`[PersistedFlatVectorStore] Failed to save index:`, err);
+    } finally {
+      this.saving = false;
     }
   }
 

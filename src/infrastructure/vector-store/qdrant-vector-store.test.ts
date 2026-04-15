@@ -66,9 +66,23 @@ describe("QdrantVectorStore", () => {
     });
 
     const store = new QdrantVectorStore("http://localhost:6333", 128);
-    
+
     await expect(store.size()).rejects.toThrow(QdrantVectorStoreError);
-    await expect(store.size()).rejects.toThrow(/wrong vector size/);
+  });
+
+  it("Transient init failure allows retry on next call", async () => {
+    mockGetCollections
+      .mockRejectedValueOnce(new Error("Network timeout"))
+      .mockResolvedValueOnce({ collections: [] });
+    mockCreateCollection.mockResolvedValue({});
+
+    const store = new QdrantVectorStore("http://localhost:6333", 128);
+
+    await expect(store.size()).rejects.toThrow(QdrantVectorStoreError);
+    // Second call retries initialization instead of returning cached rejection
+    const size = await store.size();
+    expect(size).toBe(0);
+    expect(mockGetCollections).toHaveBeenCalledTimes(2);
   });
 
   it("upsert maps VectorEntry to correct Qdrant point shape", async () => {

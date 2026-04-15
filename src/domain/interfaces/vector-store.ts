@@ -28,6 +28,12 @@ export interface IVectorStore {
 
   /** Number of documents currently indexed. */
   size(): Promise<number>;
+
+  /**
+   * Persist any in-memory state to durable storage.
+   * Implementations that persist automatically (e.g. Qdrant) may no-op.
+   */
+  save(): Promise<void>;
 }
 
 export interface VectorEntry {

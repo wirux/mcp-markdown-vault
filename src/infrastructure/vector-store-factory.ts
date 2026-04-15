@@ -10,8 +10,9 @@ export async function createVectorStore(
   const qdrantUrl = process.env.VECTOR_STORE_URL;
 
   if (qdrantUrl) {
-    console.error(`[VectorStore] Using Qdrant at ${qdrantUrl}`);
-    return new QdrantVectorStore(qdrantUrl, dimensions);
+    const collectionName = process.env.VECTOR_STORE_COLLECTION ?? "markdown_vault";
+    console.error(`[VectorStore] Using Qdrant at ${qdrantUrl} (collection: ${collectionName})`);
+    return new QdrantVectorStore(qdrantUrl, dimensions, collectionName);
   }
 
   console.error("[VectorStore] Using PersistedFlatVectorStore (local)");

@@ -69,6 +69,10 @@ export class InMemoryVectorStore implements IVectorStore {
   async size(): Promise<number> {
     return this.docs.size;
   }
+
+  async save(): Promise<void> {
+    // In-memory store has no persistence
+  }
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
