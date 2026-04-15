@@ -17,12 +17,12 @@ export interface OllamaConfig {
  */
 export class OllamaEmbeddingProvider implements IEmbeddingProvider {
   private readonly baseUrl: string;
-  private readonly model: string;
+  public readonly modelName: string;
   public readonly dimensions: number;
 
   constructor(config: OllamaConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, "");
-    this.model = config.model;
+    this.modelName = config.model;
     this.dimensions = config.dimensions;
   }
 
@@ -31,7 +31,7 @@ export class OllamaEmbeddingProvider implements IEmbeddingProvider {
       const response = await fetch(`${this.baseUrl}/api/embed`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: this.model, input: text }),
+        body: JSON.stringify({ model: this.modelName, input: text }),
       });
 
       if (!response.ok) {

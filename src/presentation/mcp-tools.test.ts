@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { createMcpServer, type McpDependencies } from "./mcp-tools.js";
 import { LocalFileSystemAdapter } from "../infrastructure/local-fs-adapter.js";
-import { InMemoryVectorStore } from "../infrastructure/in-memory-vector-store.js";
+import { InMemoryVectorStore } from "../infrastructure/vector-store/in-memory-vector-store.js";
 import { WorkflowStateMachine } from "../use-cases/workflow-state.js";
 import type { IEmbeddingProvider } from "../domain/interfaces/index.js";
 import { MarkdownPipeline } from "../use-cases/markdown-pipeline.js";

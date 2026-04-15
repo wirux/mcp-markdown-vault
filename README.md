@@ -200,6 +200,9 @@ The server selects an embedding provider automatically:
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings |
 | `OLLAMA_MODEL` | `nomic-embed-text` | Ollama embedding model name |
 | `OLLAMA_DIMENSIONS` | `768` | Ollama embedding vector dimensions |
+| `VECTOR_STORE_URL` | *(unset)* | Set to use Qdrant (e.g. `http://localhost:6333`). If unset, local persisted flat store is used. |
+
+> **Note**: When using the default local vector store, a `.markdown_vault_mcp` directory will be created in your vault. It's recommended to add this directory to your `.gitignore`.
 
 ---
 

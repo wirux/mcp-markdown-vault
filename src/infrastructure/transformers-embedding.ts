@@ -19,7 +19,7 @@ const DEFAULT_DIMENSIONS = 384;
  * The model is downloaded on first use and cached locally.
  */
 export class TransformersEmbeddingProvider implements IEmbeddingProvider {
-  private readonly model: string;
+  public readonly modelName: string;
   public readonly dimensions: number;
   private extractor:
     | ((
@@ -29,7 +29,7 @@ export class TransformersEmbeddingProvider implements IEmbeddingProvider {
     | null = null;
 
   constructor(config?: TransformersConfig) {
-    this.model = config?.model ?? DEFAULT_MODEL;
+    this.modelName = config?.model ?? DEFAULT_MODEL;
     this.dimensions = config?.dimensions ?? DEFAULT_DIMENSIONS;
   }
 
@@ -43,11 +43,11 @@ export class TransformersEmbeddingProvider implements IEmbeddingProvider {
       try {
         this.extractor = (await pipeline(
           "feature-extraction",
-          this.model,
+          this.modelName,
         )) as unknown as typeof this.extractor;
       } catch (err) {
         throw new EmbeddingError(
-          `Failed to load embedding model "${this.model}"`,
+          `Failed to load embedding model "${this.modelName}"`,
           err instanceof Error ? err : undefined,
         );
       }

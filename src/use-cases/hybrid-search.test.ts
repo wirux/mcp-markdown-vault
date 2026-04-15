@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { HybridSearcher } from "./hybrid-search.js";
-import { InMemoryVectorStore } from "../infrastructure/in-memory-vector-store.js";
+import { InMemoryVectorStore } from "../infrastructure/vector-store/in-memory-vector-store.js";
 import type {
   IEmbeddingProvider,
   VectorEntry,

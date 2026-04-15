@@ -3,7 +3,7 @@ import type {
   VectorEntry,
   VectorChunk,
   VectorSearchResult,
-} from "../domain/interfaces/index.js";
+} from "../../domain/interfaces/index.js";
 
 interface StoredChunk {
   docPath: string;

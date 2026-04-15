@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { VaultIndexer } from "./vault-indexer.js";
-import { InMemoryVectorStore } from "../infrastructure/in-memory-vector-store.js";
+import { InMemoryVectorStore } from "../infrastructure/vector-store/in-memory-vector-store.js";
 import type { IEmbeddingProvider } from "../domain/interfaces/index.js";
 
 // ── Fake embedding provider ───────────────────────────────────────

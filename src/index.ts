@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { LocalFileSystemAdapter } from "./infrastructure/local-fs-adapter.js";
-import { InMemoryVectorStore } from "./infrastructure/in-memory-vector-store.js";
+import { createVectorStore } from "./infrastructure/vector-store-factory.js";
 import { OllamaEmbeddingProvider } from "./infrastructure/ollama-embedding.js";
 import { TransformersEmbeddingProvider } from "./infrastructure/transformers-embedding.js";
 import type { IEmbeddingProvider } from "./domain/interfaces/index.js";
@@ -69,8 +69,8 @@ async function main(): Promise<void> {
 
   // Shared dependencies (reused across all client connections)
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
-  const vectorStore = new InMemoryVectorStore();
   const embedder = await createEmbeddingProvider();
+  const vectorStore = await createVectorStore(vaultRoot, embedder.modelName, embedder.dimensions);
 
   // Backlink index — shared across connections
   const backlinkIndex = new BacklinkIndexService(new MarkdownPipeline());
@@ -130,11 +130,23 @@ async function main(): Promise<void> {
   });
 
   // Handle shutdown
-  process.on("SIGINT", async () => {
+  const shutdown = async () => {
     await indexer.stop();
     await handle.shutdown();
+    if ("save" in vectorStore && typeof vectorStore.save === "function") {
+      await (vectorStore as any).save();
+    }
     process.exit(0);
-  });
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  // Periodic flush every 60 seconds
+  setInterval(async () => {
+    if ("save" in vectorStore && typeof vectorStore.save === "function") {
+      await (vectorStore as any).save().catch(console.error);
+    }
+  }, 60_000).unref();
 }
 
 main().catch((err) => {

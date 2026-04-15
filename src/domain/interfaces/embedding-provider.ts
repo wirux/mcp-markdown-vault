@@ -20,4 +20,7 @@ export interface IEmbeddingProvider {
 
   /** The dimensionality of vectors produced by this provider. */
   readonly dimensions: number;
+
+  /** The name of the embedding model used. */
+  readonly modelName: string;
 }
