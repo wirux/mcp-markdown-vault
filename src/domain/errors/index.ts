@@ -125,6 +125,15 @@ export class BatchLimitExceededError extends DomainError {
   }
 }
 
+// ── Authentication errors ─────────────────────────────────────────
+
+export class AuthenticationError extends DomainError {
+  constructor(detail: string) {
+    super("AUTHENTICATION_FAILED", `Authentication failed: ${detail}`);
+    this.name = "AuthenticationError";
+  }
+}
+
 // ── Workflow / State errors ────────────────────────────────────────
 
 export class StateTransitionError extends DomainError {

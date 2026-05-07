@@ -145,3 +145,88 @@ describe("createSseApp", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 });
+
+describe("createSseApp with auth", () => {
+  const openServers: HttpServer[] = [];
+
+  afterEach(async () => {
+    for (const s of openServers) {
+      await new Promise<void>((resolve) => s.close(() => resolve()));
+    }
+    openServers.length = 0;
+  });
+
+  function listenWithAuth(token: string) {
+    const serverFactory = createMockServerFactory();
+    const { app, sessions } = createSseApp(serverFactory, {
+      authToken: token,
+    });
+    const httpServer = app.listen(0);
+    openServers.push(httpServer);
+    const { port } = httpServer.address() as AddressInfo;
+    return { sessions, port, serverFactory };
+  }
+
+  it("GET /sse rejects without token when auth is enabled", async () => {
+    const { port } = listenWithAuth("test-token");
+
+    const controller = new AbortController();
+    try {
+      const res = await fetch(`http://localhost:${port}/sse`, {
+        signal: controller.signal,
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      controller.abort();
+    }
+  });
+
+  it("POST /messages rejects without token when auth is enabled", async () => {
+    const { port } = listenWithAuth("test-token");
+
+    const res = await fetch(
+      `http://localhost:${port}/messages?sessionId=abc`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /sse allows with valid token", async () => {
+    const { port, sessions } = listenWithAuth("test-token");
+
+    const controller = new AbortController();
+    try {
+      const res = await fetch(`http://localhost:${port}/sse`, {
+        signal: controller.signal,
+        headers: { Authorization: "Bearer test-token" },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/event-stream");
+      expect(sessions.size).toBe(1);
+    } finally {
+      controller.abort();
+    }
+  });
+
+  it("POST /messages allows with valid token", async () => {
+    const { port } = listenWithAuth("test-token");
+
+    const res = await fetch(
+      `http://localhost:${port}/messages?sessionId=nonexistent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({}),
+      },
+    );
+    // 404 = auth passed, session not found (expected)
+    expect(res.status).toBe(404);
+  });
+});
