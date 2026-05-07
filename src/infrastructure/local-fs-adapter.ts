@@ -9,20 +9,19 @@ import {
   VaultNotFoundError,
   NoteNotFoundError,
   NoteAlreadyExistsError,
+  SymlinkEscapeError,
 } from "../domain/errors/index.js";
 import { SafePath } from "../domain/value-objects/index.js";
 
 export class LocalFileSystemAdapter implements IFileSystemAdapter {
   private readonly vaultRoot: string;
+  private readonly canonicalRoot: string;
 
-  private constructor(vaultRoot: string) {
+  private constructor(vaultRoot: string, canonicalRoot: string) {
     this.vaultRoot = vaultRoot;
+    this.canonicalRoot = canonicalRoot;
   }
 
-  /**
-   * Factory that validates the vault directory exists.
-   * @throws VaultNotFoundError if path doesn't exist or is not a directory.
-   */
   static async create(vaultRoot: string): Promise<LocalFileSystemAdapter> {
     const resolved = path.resolve(vaultRoot);
     try {
@@ -34,13 +33,47 @@ export class LocalFileSystemAdapter implements IFileSystemAdapter {
       if (err instanceof VaultNotFoundError) throw err;
       throw new VaultNotFoundError(vaultRoot);
     }
-    return new LocalFileSystemAdapter(resolved);
+    const canonicalRoot = await fs.realpath(resolved);
+    return new LocalFileSystemAdapter(resolved, canonicalRoot);
+  }
+
+  private async assertContained(absPath: string): Promise<void> {
+    let canonical: string;
+    try {
+      canonical = await fs.realpath(absPath);
+    } catch {
+      await this.assertParentContained(absPath);
+      return;
+    }
+    if (!canonical.startsWith(this.canonicalRoot + path.sep) && canonical !== this.canonicalRoot) {
+      throw new SymlinkEscapeError(canonical);
+    }
+  }
+
+  private async assertParentContained(absPath: string): Promise<void> {
+    let current = path.dirname(absPath);
+    while (true) {
+      try {
+        const canonical = await fs.realpath(current);
+        if (!canonical.startsWith(this.canonicalRoot + path.sep) && canonical !== this.canonicalRoot) {
+          throw new SymlinkEscapeError(canonical);
+        }
+        return;
+      } catch (err) {
+        if (err instanceof SymlinkEscapeError) throw err;
+        const parent = path.dirname(current);
+        if (parent === current) return;
+        current = parent;
+      }
+    }
   }
 
   async listNotes(directory?: string): Promise<string[]> {
     const target = directory
       ? SafePath.createDirectory(this.vaultRoot, directory)
       : SafePath.createDirectory(this.vaultRoot, "");
+
+    await this.assertContained(target.absolute);
 
     try {
       await fs.access(target.absolute);
@@ -73,6 +106,7 @@ export class LocalFileSystemAdapter implements IFileSystemAdapter {
 
   async readNote(notePath: string): Promise<string> {
     const safePath = SafePath.create(this.vaultRoot, notePath);
+    await this.assertContained(safePath.absolute);
     try {
       return await fs.readFile(safePath.absolute, "utf-8");
     } catch {
@@ -86,6 +120,7 @@ export class LocalFileSystemAdapter implements IFileSystemAdapter {
     overwrite?: boolean,
   ): Promise<void> {
     const safePath = SafePath.create(this.vaultRoot, notePath);
+    await this.assertContained(safePath.absolute);
 
     // Check for existing file when overwrite is not enabled
     if (!overwrite) {
@@ -122,6 +157,7 @@ export class LocalFileSystemAdapter implements IFileSystemAdapter {
 
   async deleteNote(notePath: string): Promise<void> {
     const safePath = SafePath.create(this.vaultRoot, notePath);
+    await this.assertContained(safePath.absolute);
     try {
       await fs.unlink(safePath.absolute);
     } catch {
@@ -131,6 +167,7 @@ export class LocalFileSystemAdapter implements IFileSystemAdapter {
 
   async exists(notePath: string): Promise<boolean> {
     const safePath = SafePath.create(this.vaultRoot, notePath);
+    await this.assertContained(safePath.absolute);
     try {
       await fs.access(safePath.absolute);
       return true;
@@ -141,6 +178,7 @@ export class LocalFileSystemAdapter implements IFileSystemAdapter {
 
   async stat(notePath: string): Promise<NoteStat> {
     const safePath = SafePath.create(this.vaultRoot, notePath);
+    await this.assertContained(safePath.absolute);
     try {
       const fileStat = await fs.stat(safePath.absolute);
       return {

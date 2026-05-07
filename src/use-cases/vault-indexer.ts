@@ -1,8 +1,8 @@
-import fs from "node:fs/promises";
 import path from "node:path";
-import chokidar, { type FSWatcher } from "chokidar";
 import type {
   IEmbeddingProvider,
+  IFileSystemAdapter,
+  IFileWatcher,
   IVectorStore,
   VectorChunk,
 } from "../domain/interfaces/index.js";
@@ -12,6 +12,17 @@ import { MarkdownPipeline } from "./markdown-pipeline.js";
 export interface WatcherOptions {
   /** Milliseconds to debounce file-change events. Default: 500. */
   debounceMs?: number;
+}
+
+/** Snapshot of the indexer's current health and operational state. */
+export interface IndexingHealthStatus {
+  /** Derived state priority: 'indexing' > 'watching' > 'error' > 'idle'. */
+  indexingState: "idle" | "indexing" | "watching" | "error";
+  watcherState: "stopped" | "active";
+  queueDepth: number;
+  failureCount: number;
+  lastFailure: { time: string; source: string } | null;
+  indexedDocuments: number;
 }
 
 /**
@@ -27,10 +38,11 @@ export class VaultIndexer {
   private readonly vaultRoot: string;
   private readonly store: IVectorStore;
   private readonly embedder: IEmbeddingProvider;
+  private readonly watcherAdapter: IFileWatcher;
+  private readonly fs: IFileSystemAdapter;
   private readonly chunker: MarkdownChunker;
-  private watcher: FSWatcher | null = null;
+  private watcherActive = false;
 
-  /** Set of vault-relative paths pending indexing. */
   /** Callback invoked after a file is successfully indexed. */
   private onFileIndexedCb?: (relativePath: string, content: string) => void;
   /** Callback invoked after a file is removed from the index. */
@@ -41,14 +53,28 @@ export class VaultIndexer {
   /** Debounce timers keyed by relative path. */
   private readonly debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /** Serialization guard — prevents concurrent processQueue runs. */
+  private isProcessing = false;
+
+  /** Number of indexing failures since startup. */
+  failureCount = 0;
+  /** Timestamp of the most recent indexing failure, or null if none. */
+  lastFailureTime: Date | null = null;
+  /** Vault-relative path of the most recently failed file, or null if none. */
+  lastFailureSource: string | null = null;
+
   constructor(
     vaultRoot: string,
     store: IVectorStore,
     embedder: IEmbeddingProvider,
+    watcher: IFileWatcher,
+    fs: IFileSystemAdapter,
   ) {
     this.vaultRoot = path.resolve(vaultRoot);
     this.store = store;
     this.embedder = embedder;
+    this.watcherAdapter = watcher;
+    this.fs = fs;
     this.chunker = new MarkdownChunker(new MarkdownPipeline());
   }
 
@@ -70,8 +96,7 @@ export class VaultIndexer {
   // ── Single-file operations ─────────────────────────────────────
 
   async indexFile(relativePath: string): Promise<void> {
-    const absPath = path.join(this.vaultRoot, relativePath);
-    const content = await fs.readFile(absPath, "utf-8");
+    const content = await this.fs.readNote(relativePath);
 
     const chunks = this.chunker.chunk(content);
     if (chunks.length === 0) {
@@ -104,7 +129,7 @@ export class VaultIndexer {
   // ── Bulk indexing ──────────────────────────────────────────────
 
   async indexAll(): Promise<void> {
-    const files = await this.listMdFiles(this.vaultRoot);
+    const files = await this.fs.listNotes();
     for (const file of files) {
       try {
         await this.indexFile(file);
@@ -112,23 +137,6 @@ export class VaultIndexer {
         // Skip files that fail to index and continue with the rest.
       }
     }
-  }
-
-  private async listMdFiles(dir: string): Promise<string[]> {
-    const entries = await fs.readdir(dir, {
-      recursive: true,
-      withFileTypes: true,
-    });
-    const mdFiles: string[] = [];
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-      const entryDir =
-        entry.parentPath ??
-        (entry as unknown as { path: string }).path;
-      const fullPath = path.join(entryDir, entry.name);
-      mdFiles.push(path.relative(this.vaultRoot, fullPath));
-    }
-    return mdFiles.sort();
   }
 
   // ── Offline queue ──────────────────────────────────────────────
@@ -142,9 +150,10 @@ export class VaultIndexer {
     this.queue.clear();
 
     for (const relPath of paths) {
-      const absPath = path.join(this.vaultRoot, relPath);
       try {
-        await fs.access(absPath);
+        if (!(await this.fs.exists(relPath))) {
+          throw new Error("File not found");
+        }
         await this.indexFile(relPath);
       } catch {
         // File was deleted between enqueue and process
@@ -153,21 +162,41 @@ export class VaultIndexer {
     }
   }
 
+  private async drain(): Promise<void> {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+    try {
+      while (this.queue.size > 0) {
+        const paths = [...this.queue];
+        this.queue.clear();
+        for (const relPath of paths) {
+          try {
+            if (!(await this.fs.exists(relPath))) {
+              throw new Error("File not found");
+            }
+            await this.indexFile(relPath);
+          } catch {
+            this.failureCount++;
+            this.lastFailureTime = new Date();
+            this.lastFailureSource = relPath;
+            await this.removeFile(relPath);
+          }
+        }
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
   // ── File watching ──────────────────────────────────────────────
 
   async startWatching(options?: WatcherOptions): Promise<void> {
     const debounceMs = options?.debounceMs ?? 500;
 
-    this.watcher = chokidar.watch(this.vaultRoot, {
-      ignored: (filePath: string) => {
-        // Ignore non-.md files (but allow directories)
-        const ext = path.extname(filePath);
-        return ext !== "" && ext !== ".md";
-      },
+    this.watcherAdapter.watch(this.vaultRoot, {
       persistent: true,
-      ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: 100 },
     });
+    this.watcherActive = true;
 
     const handleChange = (absPath: string): void => {
       const relPath = path.relative(this.vaultRoot, absPath);
@@ -180,17 +209,19 @@ export class VaultIndexer {
       const timer = setTimeout(() => {
         this.debounceTimers.delete(relPath);
         this.enqueue(relPath);
+        void this.drain();
       }, debounceMs);
 
       this.debounceTimers.set(relPath, timer);
     };
 
-    this.watcher.on("add", handleChange);
-    this.watcher.on("change", handleChange);
-    this.watcher.on("unlink", (absPath: string) => {
+    this.watcherAdapter.on("add", handleChange);
+    this.watcherAdapter.on("change", handleChange);
+    this.watcherAdapter.on("unlink", (absPath: string) => {
       const relPath = path.relative(this.vaultRoot, absPath);
       if (!relPath.endsWith(".md")) return;
       this.enqueue(relPath);
+      void this.drain();
     });
   }
 
@@ -201,9 +232,33 @@ export class VaultIndexer {
     }
     this.debounceTimers.clear();
 
-    if (this.watcher) {
-      await this.watcher.close();
-      this.watcher = null;
+    if (this.watcherActive) {
+      await this.watcherAdapter.close();
+      this.watcherActive = false;
     }
+  }
+
+  async getHealthStatus(): Promise<IndexingHealthStatus> {
+    const indexingState: IndexingHealthStatus["indexingState"] = this.isProcessing
+      ? "indexing"
+      : this.watcherActive
+        ? "watching"
+        : this.failureCount > 0
+          ? "error"
+          : "idle";
+
+    const lastFailure =
+      this.lastFailureTime !== null && this.lastFailureSource !== null
+        ? { time: this.lastFailureTime.toISOString(), source: this.lastFailureSource }
+        : null;
+
+    return {
+      indexingState,
+      watcherState: this.watcherActive ? "active" : "stopped",
+      queueDepth: this.queue.size,
+      failureCount: this.failureCount,
+      lastFailure,
+      indexedDocuments: await this.store.size(),
+    };
   }
 }

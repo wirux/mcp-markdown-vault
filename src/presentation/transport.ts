@@ -8,9 +8,6 @@ import { createBearerAuthMiddleware } from "./auth-middleware.js";
 
 export type TransportType = "stdio" | "sse";
 
-/**
- * Validate and parse the MCP_TRANSPORT_TYPE environment variable.
- */
 export function parseTransportType(value?: string): TransportType {
   if (value === undefined || value === "stdio") return "stdio";
   if (value === "sse") return "sse";
@@ -21,6 +18,7 @@ export function parseTransportType(value?: string): TransportType {
 
 export interface SseAppOptions {
   authToken?: string | undefined;
+  bodyLimit?: string | undefined;
 }
 
 export interface SseApp {
@@ -28,24 +26,30 @@ export interface SseApp {
   sessions: Map<string, SSEServerTransport>;
 }
 
-/**
- * Create an Express app wired for SSE transport.
- *
- * - GET  /sse       — establishes an SSE stream (one per client)
- * - POST /messages   — forwards JSON-RPC messages to the correct session
- *
- * Each GET /sse connection gets its own McpServer instance (via serverFactory)
- * so workflow state is isolated per client.
- *
- * When `authToken` is provided, all endpoints require `Authorization: Bearer <token>`.
- */
+function isLocalhostOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
 export function createSseApp(
   serverFactory: () => McpServer,
   options?: SseAppOptions,
 ): SseApp {
   const app = express();
-  app.use(cors());
-  app.use(express.json());
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || isLocalhostOrigin(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS: origin not allowed"));
+      }
+    },
+  }));
+  app.use(express.json({ limit: options?.bodyLimit ?? "1mb" }));
 
   const authMiddleware = createBearerAuthMiddleware(options?.authToken);
   if (authMiddleware) {
@@ -58,8 +62,6 @@ export function createSseApp(
     const transport = new SSEServerTransport("/messages", res);
     const server = serverFactory();
 
-    // Register session before connect (which writes SSE headers)
-    // so it's available by the time the client receives the response.
     sessions.set(transport.sessionId, transport);
 
     res.on("close", () => {
@@ -89,6 +91,19 @@ export function createSseApp(
     await transport.handlePostMessage(req, res, req.body);
   });
 
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const status = (err as { status?: number; statusCode?: number }).status
+      ?? (err as { status?: number; statusCode?: number }).statusCode
+      ?? 500;
+    if (status === 413) {
+      res.status(413).json({ error: "Payload too large" });
+    } else if (status === 400) {
+      res.status(400).json({ error: "Bad request" });
+    } else {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   return { app, sessions };
 }
 
@@ -105,7 +120,12 @@ export interface TransportHandle {
 export async function startTransport(
   type: TransportType,
   serverFactory: () => McpServer,
-  options?: { port?: number | undefined; authToken?: string | undefined },
+  options?: {
+    port?: number | undefined;
+    authToken?: string | undefined;
+    hostBindAddress?: string | undefined;
+    bodyLimit?: string | undefined;
+  },
 ): Promise<TransportHandle> {
   if (type === "stdio") {
     const server = serverFactory();
@@ -120,12 +140,14 @@ export async function startTransport(
 
   const { app, sessions } = createSseApp(serverFactory, {
     authToken: options?.authToken,
+    bodyLimit: options?.bodyLimit,
   });
   const port = options?.port ?? 3000;
+  const host = options?.hostBindAddress ?? "127.0.0.1";
 
   const httpServer: HttpServer = await new Promise((resolve) => {
-    const s = app.listen(port, () => {
-      console.error(`SSE transport listening on http://localhost:${port}/sse`);
+    const s = app.listen(port, host, () => {
+      console.error(`SSE transport listening on http://${host}:${port}/sse`);
       resolve(s);
     });
   });

@@ -2,6 +2,7 @@ import path from "node:path";
 import {
   PathTraversalError,
   InvalidNotePathError,
+  AbsolutePathError,
 } from "../errors/index.js";
 
 /**
@@ -98,6 +99,11 @@ function sanitize(input: string): string {
   // Normalize backslashes to forward slashes
   decoded = decoded.replace(/\\/g, "/");
 
+  // Reject absolute paths BEFORE stripping — must be explicit rejection, not silent normalization
+  if (isAbsolutePath(decoded)) {
+    throw new AbsolutePathError(input);
+  }
+
   // Check for traversal patterns BEFORE path.resolve can hide them
   if (containsTraversal(decoded)) {
     throw new PathTraversalError(input);
@@ -107,6 +113,16 @@ function sanitize(input: string): string {
   const stripped = decoded.replace(/^\/+/, "");
 
   return stripped;
+}
+
+function isAbsolutePath(p: string): boolean {
+  // POSIX absolute: starts with /
+  if (p.startsWith("/")) return true;
+  // Windows drive letter: C:/ or C:\
+  if (/^[A-Za-z]:[/\\]/.test(p)) return true;
+  // UNC paths: \\server\share or //server/share
+  if (p.startsWith("\\\\") || p.startsWith("//")) return true;
+  return false;
 }
 
 function containsTraversal(p: string): boolean {

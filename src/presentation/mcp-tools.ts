@@ -25,7 +25,7 @@ import { VaultIndexer } from "../use-cases/vault-indexer.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
-import { DomainError } from "../domain/errors/index.js";
+import { DomainError, InvalidArgumentError } from "../domain/errors/index.js";
 
 export interface McpDependencies {
   fsAdapter: IFileSystemAdapter;
@@ -71,21 +71,21 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return notes;
         }
         case "read": {
-          if (!path) throw new Error("path is required for read");
+          if (!path) throw new InvalidArgumentError("path");
           const noteContent = await deps.fsAdapter.readNote(path);
           return noteContent;
         }
         case "create": {
-          if (!path) throw new Error("path is required for create");
-          if (!content) throw new Error("content is required for create");
+          if (!path) throw new InvalidArgumentError("path");
+          if (!content) throw new InvalidArgumentError("content");
           await deps.fsAdapter.writeNote(path, content);
           deps.backlinkIndex?.updateFile(path, content);
           deps.indexer?.indexFile(path).catch(() => {/* background */});
           return `Note created: ${path}`;
         }
         case "update": {
-          if (!path) throw new Error("path is required for update");
-          if (!content) throw new Error("content is required for update");
+          if (!path) throw new InvalidArgumentError("path");
+          if (!content) throw new InvalidArgumentError("content");
           const useCase = new UpdateFileUseCase(deps.fsAdapter);
           const result = await useCase.execute({ path, content });
           deps.backlinkIndex?.updateFile(path, content);
@@ -93,20 +93,20 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return result.message;
         }
         case "delete": {
-          if (!path) throw new Error("path is required for delete");
+          if (!path) throw new InvalidArgumentError("path");
           await deps.fsAdapter.deleteNote(path);
           deps.backlinkIndex?.removeFile(path);
           deps.indexer?.removeFile(path).catch(() => {/* background */});
           return `Note deleted: ${path}`;
         }
         case "stat": {
-          if (!path) throw new Error("path is required for stat");
+          if (!path) throw new InvalidArgumentError("path");
           const stat = await deps.fsAdapter.stat(path);
           return stat;
         }
         case "create_from_template": {
-          if (!path) throw new Error("path is required for create_from_template");
-          if (!templatePath) throw new Error("templatePath is required for create_from_template");
+          if (!path) throw new InvalidArgumentError("path");
+          if (!templatePath) throw new InvalidArgumentError("templatePath");
           const engine = new RegexTemplateEngine();
           const useCase = new CreateFromTemplateUseCase(deps.fsAdapter, engine);
           const result = await useCase.execute({
@@ -121,7 +121,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return result.message;
         }
         default:
-          throw new Error(`Unknown vault action: ${String(action)}`);
+          throw new InvalidArgumentError("action");
       }
     });
   });
@@ -190,9 +190,9 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       }
 
       // ── Single mode — validate required fields ─────────────
-      if (!notePath) throw new Error("path is required for single edit");
-      if (!operation) throw new Error("operation is required for single edit");
-      if (content === undefined) throw new Error("content is required for single edit");
+      if (!notePath) throw new InvalidArgumentError("path");
+      if (!operation) throw new InvalidArgumentError("operation");
+      if (content === undefined) throw new InvalidArgumentError("content");
 
       const source = await deps.fsAdapter.readNote(notePath);
       const diffService = new UnifiedDiffService();
@@ -209,7 +209,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       // ── Freeform operations ─────────────────────────────────────
       if (operation === "line_replace") {
         if (startLine === undefined || endLine === undefined) {
-          throw new Error("startLine and endLine are required for line_replace");
+          throw new InvalidArgumentError("startLine/endLine");
         }
         const newContent = FreeformEditor.lineReplace(source, startLine, endLine, content);
         const result = await dryRunEditor.execute({
@@ -224,7 +224,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
 
       if (operation === "string_replace") {
         if (!searchText) {
-          throw new Error("searchText is required for string_replace");
+          throw new InvalidArgumentError("searchText");
         }
         const newContent = FreeformEditor.stringReplace(source, searchText, content, replaceAll ?? false);
         const result = await dryRunEditor.execute({
@@ -318,8 +318,8 @@ export function createMcpServer(deps: McpDependencies): McpServer {
     return wrapTool(deps.workflow, "view", async () => {
       switch (action) {
         case "search": {
-          if (!notePath) throw new Error("path is required for search");
-          if (!query) throw new Error("query is required for search");
+          if (!notePath) throw new InvalidArgumentError("path");
+          if (!query) throw new InvalidArgumentError("query");
           const source = await deps.fsAdapter.readNote(notePath);
           const fragments = retriever.retrieve(source, query, {
             maxChunks: maxChunks ?? 5,
@@ -332,7 +332,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           }));
         }
         case "global_search": {
-          if (!query) throw new Error("query is required for global_search");
+          if (!query) throw new InvalidArgumentError("query");
           const results = await vaultSearcher.search(query, {
             maxResults: maxChunks ?? 20,
             directory,
@@ -346,7 +346,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           }));
         }
         case "semantic_search": {
-          if (!query) throw new Error("query is required for semantic_search");
+          if (!query) throw new InvalidArgumentError("query");
           const results = await hybridSearcher.search(query, {
             k: maxChunks ?? 10,
             directory,
@@ -361,13 +361,13 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           }));
         }
         case "outline": {
-          if (!notePath) throw new Error("path is required for outline");
+          if (!notePath) throw new InvalidArgumentError("path");
           const source = await deps.fsAdapter.readNote(notePath);
           const tree = pipeline.parse(source);
           return AstNavigator.findAllHeadings(tree);
         }
         case "read": {
-          if (!notePath) throw new Error("path is required for read");
+          if (!notePath) throw new InvalidArgumentError("path");
           if (heading) {
             const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
             const useCase = new ReadByHeadingUseCase(repo, pipeline);
@@ -382,7 +382,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return content;
         }
         case "frontmatter_get": {
-          if (!notePath) throw new Error("path is required for frontmatter_get");
+          if (!notePath) throw new InvalidArgumentError("path");
           const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
           const useCase = new GetFrontmatterUseCase(repo);
           const result = await useCase.execute({ path: notePath });
@@ -399,7 +399,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return result;
         }
         case "backlinks": {
-          if (!notePath) throw new Error("path is required for backlinks");
+          if (!notePath) throw new InvalidArgumentError("path");
           if (!deps.backlinkIndex) {
             return { target: notePath, backlinks: [], count: 0 };
           }
@@ -407,7 +407,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return { target: notePath, backlinks, count: backlinks.length };
         }
         default:
-          throw new Error(`Unknown view action: ${String(action)}`);
+          throw new InvalidArgumentError("action");
       }
     });
   });
@@ -434,7 +434,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           };
         }
         case "transition": {
-          if (!transition) throw new Error("transition name is required");
+          if (!transition) throw new InvalidArgumentError("transition");
           deps.workflow.fire(transition);
           return {
             currentState: deps.workflow.currentPlace,
@@ -449,7 +449,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return { currentState: deps.workflow.currentPlace };
         }
         default:
-          throw new Error(`Unknown workflow action: ${String(action)}`);
+          throw new InvalidArgumentError("action");
       }
     });
   });
@@ -468,12 +468,21 @@ export function createMcpServer(deps: McpDependencies): McpServer {
     return wrapTool(deps.workflow, "system", async () => {
       switch (action) {
         case "status": {
-          const indexedDocs = await deps.vectorStore.size();
-          return {
-            vaultRoot: deps.vaultRoot,
-            indexedDocuments: indexedDocs,
+          const base = {
+            indexedDocuments: await deps.vectorStore.size(),
             backlinkIndexSize: deps.backlinkIndex?.indexSize ?? 0,
             workflowState: deps.workflow.currentPlace,
+          };
+          if (!deps.indexer) return base;
+          const health = await deps.indexer.getHealthStatus();
+          return {
+            ...base,
+            indexedDocuments: health.indexedDocuments,
+            indexingState: health.indexingState,
+            watcherState: health.watcherState,
+            queueDepth: health.queueDepth,
+            failureCount: health.failureCount,
+            lastFailure: health.lastFailure,
           };
         }
         case "reindex": {
@@ -503,7 +512,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           return overviewService.getOverview(maxDepth);
         }
         default:
-          throw new Error(`Unknown system action: ${String(action)}`);
+          throw new InvalidArgumentError("action");
       }
     });
   });
@@ -528,9 +537,10 @@ async function wrapTool<T>(
     const message =
       err instanceof DomainError
         ? `[${err.code}] ${err.message}`
-        : err instanceof Error
-          ? err.message
-          : String(err);
+        : "Internal error occurred";
+    if (!(err instanceof DomainError)) {
+      console.error("Unexpected tool error:", err);
+    }
     return {
       content: [{ type: "text", text: message }],
       isError: true,

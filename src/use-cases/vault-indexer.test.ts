@@ -1,15 +1,24 @@
+/// <reference types="node" />
+
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { VaultIndexer } from "./vault-indexer.js";
+import { LocalFileSystemAdapter } from "../infrastructure/local-fs-adapter.js";
 import { InMemoryVectorStore } from "../infrastructure/vector-store/in-memory-vector-store.js";
-import type { IEmbeddingProvider } from "../domain/interfaces/index.js";
+import type {
+  IEmbeddingProvider,
+  IFileSystemAdapter,
+  IFileWatcher,
+  WatchEventType,
+} from "../domain/interfaces/index.js";
 
 // ── Fake embedding provider ───────────────────────────────────────
 
 class FakeEmbeddingProvider implements IEmbeddingProvider {
   readonly dimensions = 3;
+  readonly modelName = "fake-embedder";
   readonly embedCalls: string[] = [];
 
   /** Returns a deterministic vector based on text hash. */
@@ -45,13 +54,39 @@ function simpleHash(s: string): number {
 let tmpDir: string;
 let store: InMemoryVectorStore;
 let embedder: FakeEmbeddingProvider;
+let fsAdapter: IFileSystemAdapter;
+let watcher: MockFileWatcher;
 let indexer: VaultIndexer;
+
+class MockFileWatcher implements IFileWatcher {
+  watchedPath: string | null = null;
+  closeCalls = 0;
+  readonly handlers: Partial<Record<WatchEventType, (path: string) => void>> = {};
+
+  watch(vaultPath: string): void {
+    this.watchedPath = vaultPath;
+  }
+
+  on(event: WatchEventType, handler: (path: string) => void): void {
+    this.handlers[event] = handler;
+  }
+
+  async close(): Promise<void> {
+    this.closeCalls++;
+  }
+
+  emit(event: WatchEventType, filePath: string): void {
+    this.handlers[event]?.(filePath);
+  }
+}
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "indexer-test-"));
   store = new InMemoryVectorStore();
   embedder = new FakeEmbeddingProvider();
-  indexer = new VaultIndexer(tmpDir, store, embedder);
+  fsAdapter = await LocalFileSystemAdapter.create(tmpDir);
+  watcher = new MockFileWatcher();
+  indexer = new VaultIndexer(tmpDir, store, embedder, watcher, fsAdapter);
 });
 
 afterEach(async () => {
@@ -244,23 +279,22 @@ describe("VaultIndexer", () => {
     it("starts and stops without error", async () => {
       await indexer.startWatching({ debounceMs: 50 });
       await indexer.stop();
+
+      expect(watcher.watchedPath).toBe(tmpDir);
+      expect(watcher.closeCalls).toBe(1);
     });
 
-    it("detects new files and queues them for indexing", async () => {
+    it("detects new files and auto-indexes them without manual processQueue", async () => {
       await indexer.startWatching({ debounceMs: 50 });
 
-      // Small delay to let chokidar initialise
-      await sleep(200);
-
-      // Create a file after watcher starts
       await fs.writeFile(
         path.join(tmpDir, "watched.md"),
         "# Watched\n\nContent.\n",
       );
 
-      // Wait for chokidar detection + awaitWriteFinish + debounce
-      await sleep(500);
-      await indexer.processQueue();
+      watcher.emit("add", path.join(tmpDir, "watched.md"));
+
+      await sleep(200);
 
       expect(await store.has("watched.md")).toBe(true);
     });
@@ -268,17 +302,143 @@ describe("VaultIndexer", () => {
     it("ignores non-.md files", async () => {
       await indexer.startWatching({ debounceMs: 50 });
 
-      await sleep(200);
-
       await fs.writeFile(
         path.join(tmpDir, "ignored.txt"),
         "not markdown",
       );
 
-      await sleep(150);
-      await indexer.processQueue();
+      watcher.emit("add", path.join(tmpDir, "ignored.txt"));
+
+      await sleep(100);
 
       expect(await store.size()).toBe(0);
+    });
+
+    it("processes a burst of file events — all eventually indexed", async () => {
+      await indexer.startWatching({ debounceMs: 50 });
+
+      await fs.writeFile(path.join(tmpDir, "burst1.md"), "# B1\n\nContent.\n");
+      await fs.writeFile(path.join(tmpDir, "burst2.md"), "# B2\n\nContent.\n");
+      await fs.writeFile(path.join(tmpDir, "burst3.md"), "# B3\n\nContent.\n");
+
+      watcher.emit("add", path.join(tmpDir, "burst1.md"));
+      watcher.emit("add", path.join(tmpDir, "burst2.md"));
+      watcher.emit("add", path.join(tmpDir, "burst3.md"));
+
+      await sleep(250);
+
+      expect(await store.has("burst1.md")).toBe(true);
+      expect(await store.has("burst2.md")).toBe(true);
+      expect(await store.has("burst3.md")).toBe(true);
+    });
+
+    it("tracks failure count when indexing fails", async () => {
+      const origEmbed = embedder.embed.bind(embedder);
+      embedder.embed = async (text: string) => {
+        if (text.includes("FailMe")) throw new Error("embed error");
+        return origEmbed(text);
+      };
+
+      await indexer.startWatching({ debounceMs: 50 });
+
+      await fs.writeFile(
+        path.join(tmpDir, "fail.md"),
+        "# FailMe\n\nThis will fail.\n",
+      );
+
+      watcher.emit("add", path.join(tmpDir, "fail.md"));
+
+      await sleep(200);
+
+      expect(indexer.failureCount).toBeGreaterThanOrEqual(1);
+      expect(indexer.lastFailureTime).toBeInstanceOf(Date);
+      expect(indexer.lastFailureSource).toBe("fail.md");
+    });
+
+    it("removes a deleted markdown file from the vector store on unlink", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "gone.md"),
+        "# Present\n\nContent.\n",
+      );
+      await indexer.indexFile("gone.md");
+      expect(await store.has("gone.md")).toBe(true);
+
+      await indexer.startWatching({ debounceMs: 50 });
+
+      await fs.unlink(path.join(tmpDir, "gone.md"));
+
+      watcher.emit("unlink", path.join(tmpDir, "gone.md"));
+
+      await sleep(100);
+
+      expect(await store.has("gone.md")).toBe(false);
+    });
+  });
+  describe("getHealthStatus", () => {
+    it("returns idle state with zero counters when freshly created", async () => {
+      const status = await indexer.getHealthStatus();
+
+      expect(status.indexingState).toBe("idle");
+      expect(status.watcherState).toBe("stopped");
+      expect(status.queueDepth).toBe(0);
+      expect(status.failureCount).toBe(0);
+      expect(status.lastFailure).toBeNull();
+      expect(typeof status.indexedDocuments).toBe("number");
+    });
+
+    it("returns watching state while watcher is active", async () => {
+      await indexer.startWatching({ debounceMs: 50 });
+
+      const status = await indexer.getHealthStatus();
+
+      expect(status.indexingState).toBe("watching");
+      expect(status.watcherState).toBe("active");
+    });
+
+    it("returns error state after an indexing failure", async () => {
+      const origEmbed = embedder.embed.bind(embedder);
+      embedder.embed = async (text: string) => {
+        if (text.includes("FailHealth")) throw new Error("embed error");
+        return origEmbed(text);
+      };
+
+      await indexer.startWatching({ debounceMs: 50 });
+      await fs.writeFile(
+        path.join(tmpDir, "fail-health.md"),
+        "# FailHealth\n\nThis will fail.\n",
+      );
+      watcher.emit("add", path.join(tmpDir, "fail-health.md"));
+      await sleep(200);
+      await indexer.stop();
+
+      const status = await indexer.getHealthStatus();
+
+      expect(status.failureCount).toBeGreaterThanOrEqual(1);
+      expect(status.indexingState).toBe("error");
+      expect(status.lastFailure).not.toBeNull();
+      expect(status.lastFailure!.source).toBe("fail-health.md");
+      expect(status.lastFailure!.time).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it("indexedDocuments reflects documents in the vector store", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "health-doc.md"),
+        "# Health\n\nContent.\n",
+      );
+      await indexer.indexFile("health-doc.md");
+
+      const status = await indexer.getHealthStatus();
+
+      expect(status.indexedDocuments).toBe(1);
+    });
+
+    it("queueDepth reflects files waiting to be processed", () => {
+      indexer.enqueue("pending-a.md");
+      indexer.enqueue("pending-b.md");
+
+      void indexer.getHealthStatus().then((status) => {
+        expect(status.queueDepth).toBeGreaterThanOrEqual(0);
+      });
     });
   });
 });

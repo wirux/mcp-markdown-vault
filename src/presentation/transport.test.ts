@@ -135,14 +135,54 @@ describe("createSseApp", () => {
     expect(sessions.size).toBe(0);
   });
 
-  it("includes CORS headers in responses", async () => {
+  it("allows localhost origins in CORS", async () => {
+    const { port } = listen();
+
+    const res = await fetch(`http://localhost:${port}/messages`, {
+      method: "OPTIONS",
+      headers: { Origin: "http://localhost:3000" },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+  });
+
+  it("rejects non-localhost origins in CORS", async () => {
     const { port } = listen();
 
     const res = await fetch(`http://localhost:${port}/messages`, {
       method: "OPTIONS",
       headers: { Origin: "http://example.com" },
     });
-    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.status).toBe(500);
+  });
+
+  it("returns 413 JSON when body exceeds bodyLimit", async () => {
+    const serverFactory = createMockServerFactory();
+    const { app } = createSseApp(serverFactory, { bodyLimit: "1b" });
+    const httpServer = app.listen(0);
+    openServers.push(httpServer);
+    const { port } = httpServer.address() as AddressInfo;
+
+    const res = await fetch(`http://localhost:${port}/messages?sessionId=x`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ large: "x".repeat(100) }),
+    });
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("Payload too large");
+  });
+
+  it("returns 400 JSON for malformed JSON body", async () => {
+    const { port } = listen();
+
+    const res = await fetch(`http://localhost:${port}/messages?sessionId=x`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{ not valid json",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("Bad request");
   });
 });
 

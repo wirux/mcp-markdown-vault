@@ -12,6 +12,9 @@ import {
   EmbeddingError,
   VectorDbError,
   StateTransitionError,
+  AbsolutePathError,
+  SymlinkEscapeError,
+  InvalidArgumentError,
 } from "./index.js";
 
 describe("DomainError (base class)", () => {
@@ -139,6 +142,36 @@ describe("StateTransitionError", () => {
     expect(err.code).toBe("INVALID_STATE_TRANSITION");
     expect(err.message).toContain("idle");
     expect(err.message).toContain("reviewing");
+    expect(err).toBeInstanceOf(DomainError);
+  });
+});
+
+describe("AbsolutePathError", () => {
+  it("has code ABSOLUTE_PATH_REJECTED and includes the path", () => {
+    const err = new AbsolutePathError("/etc/passwd");
+    expect(err.code).toBe("ABSOLUTE_PATH_REJECTED");
+    expect(err.message).toContain("/etc/passwd");
+    expect(err.name).toBe("AbsolutePathError");
+    expect(err).toBeInstanceOf(DomainError);
+  });
+});
+
+describe("SymlinkEscapeError", () => {
+  it("has code SYMLINK_ESCAPE_DETECTED and includes the resolved path", () => {
+    const err = new SymlinkEscapeError("/outside/vault/secret.md");
+    expect(err.code).toBe("SYMLINK_ESCAPE_DETECTED");
+    expect(err.message).toContain("/outside/vault/secret.md");
+    expect(err.name).toBe("SymlinkEscapeError");
+    expect(err).toBeInstanceOf(DomainError);
+  });
+});
+
+describe("InvalidArgumentError", () => {
+  it("has code INVALID_ARGUMENT and includes the argument name", () => {
+    const err = new InvalidArgumentError("path");
+    expect(err.code).toBe("INVALID_ARGUMENT");
+    expect(err.message).toContain("path");
+    expect(err.name).toBe("InvalidArgumentError");
     expect(err).toBeInstanceOf(DomainError);
   });
 });

@@ -145,3 +145,31 @@ export class StateTransitionError extends DomainError {
     this.name = "StateTransitionError";
   }
 }
+
+// ── Security errors ───────────────────────────────────────────────
+
+export class AbsolutePathError extends DomainError {
+  constructor(path: string) {
+    super("ABSOLUTE_PATH_REJECTED", `Absolute path rejected: ${path}`);
+    this.name = "AbsolutePathError";
+  }
+}
+
+export class SymlinkEscapeError extends DomainError {
+  constructor(resolvedPath: string) {
+    super(
+      "SYMLINK_ESCAPE_DETECTED",
+      `Symlink escapes vault boundary: ${resolvedPath}`,
+    );
+    this.name = "SymlinkEscapeError";
+  }
+}
+
+// ── Argument errors ───────────────────────────────────────────────
+
+export class InvalidArgumentError extends DomainError {
+  constructor(argumentName: string) {
+    super("INVALID_ARGUMENT", `Required argument missing: ${argumentName}`);
+    this.name = "InvalidArgumentError";
+  }
+}
