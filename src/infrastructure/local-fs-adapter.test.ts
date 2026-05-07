@@ -8,6 +8,7 @@ import {
   NoteAlreadyExistsError,
   PathTraversalError,
   VaultNotFoundError,
+  SymlinkEscapeError,
 } from "../domain/errors/index.js";
 
 let vaultDir: string;
@@ -197,5 +198,76 @@ describe("listNotes", () => {
     await expect(adapter.listNotes("../..")).rejects.toThrow(
       PathTraversalError,
     );
+  });
+});
+
+describe("LocalFileSystemAdapter — symlink containment", () => {
+  let vaultDir: string;
+  let outsideDir: string;
+  let adapter: LocalFileSystemAdapter;
+
+  beforeEach(async () => {
+    vaultDir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-symlink-"));
+    outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "outside-"));
+    adapter = await LocalFileSystemAdapter.create(vaultDir);
+  });
+
+  afterEach(async () => {
+    await fs.rm(vaultDir, { recursive: true, force: true });
+    await fs.rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it("rejects read through symlink escaping vault", async () => {
+    const outsideFile = path.join(outsideDir, "secret.md");
+    await fs.writeFile(outsideFile, "secret content");
+    await fs.symlink(outsideFile, path.join(vaultDir, "escape.md"));
+
+    await expect(adapter.readNote("escape")).rejects.toThrow(SymlinkEscapeError);
+  });
+
+  it("rejects write to symlink target outside vault", async () => {
+    const outsideFile = path.join(outsideDir, "target.md");
+    await fs.writeFile(outsideFile, "original");
+    await fs.symlink(outsideFile, path.join(vaultDir, "escape.md"));
+
+    await expect(adapter.writeNote("escape", "new content", true)).rejects.toThrow(SymlinkEscapeError);
+  });
+
+  it("rejects delete of symlink pointing outside vault", async () => {
+    const outsideFile = path.join(outsideDir, "target.md");
+    await fs.writeFile(outsideFile, "content");
+    await fs.symlink(outsideFile, path.join(vaultDir, "escape.md"));
+
+    await expect(adapter.deleteNote("escape")).rejects.toThrow(SymlinkEscapeError);
+  });
+
+  it("allows read through symlink pointing inside vault", async () => {
+    await fs.writeFile(path.join(vaultDir, "real.md"), "# Real\n\nContent.\n");
+    await fs.symlink(path.join(vaultDir, "real.md"), path.join(vaultDir, "link.md"));
+
+    const content = await adapter.readNote("link");
+    expect(content).toContain("Real");
+  });
+
+  it("rejects write under symlinked directory pointing outside vault", async () => {
+    await fs.symlink(outsideDir, path.join(vaultDir, "linked-dir"));
+
+    await expect(adapter.writeNote("linked-dir/new-file", "content")).rejects.toThrow(SymlinkEscapeError);
+  });
+
+  it("handles vault root that is itself a symlink", async () => {
+    const realVault = await fs.mkdtemp(path.join(os.tmpdir(), "real-vault-"));
+    const symlinkVault = path.join(os.tmpdir(), `symlink-vault-${Date.now()}`);
+    await fs.symlink(realVault, symlinkVault);
+
+    try {
+      const symlinkAdapter = await LocalFileSystemAdapter.create(symlinkVault);
+      await fs.writeFile(path.join(realVault, "note.md"), "# Note\n\nContent.\n");
+      const content = await symlinkAdapter.readNote("note");
+      expect(content).toContain("Note");
+    } finally {
+      await fs.unlink(symlinkVault);
+      await fs.rm(realVault, { recursive: true, force: true });
+    }
   });
 });

@@ -15,3 +15,8 @@ export type {
   FolderSummary,
 } from "./vault-overview-service.js";
 export type { IBacklinkIndex, BacklinkEntry } from "./backlink-index.js";
+export type {
+  IFileWatcher,
+  WatchEventType,
+  WatchOptions,
+} from "./file-watcher.js";

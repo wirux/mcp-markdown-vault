@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SafePath } from "./safe-path.js";
-import { PathTraversalError, InvalidNotePathError } from "../errors/index.js";
+import { PathTraversalError, InvalidNotePathError, AbsolutePathError } from "../errors/index.js";
 
 const VAULT_ROOT = "/vault";
 
@@ -44,9 +44,10 @@ describe("SafePath", () => {
       expect(sp.absolute).toBe("/vault/note.md");
     });
 
-    it("strips leading slashes from relative path", () => {
-      const sp = SafePath.create(VAULT_ROOT, "/daily/note.md");
-      expect(sp.relative).toBe("daily/note.md");
+    it("rejects paths with leading slash (absolute path rejection)", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "/daily/note.md")).toThrow(
+        AbsolutePathError,
+      );
     });
 
     it("resolves a directory path (for listNotes)", () => {
@@ -99,11 +100,10 @@ describe("SafePath", () => {
       ).toThrow(PathTraversalError);
     });
 
-    it("treats absolute-looking paths as vault-relative (leading / stripped)", () => {
-      // /etc/passwd → vault-relative "etc/passwd.md" — safely inside vault
-      const sp = SafePath.create(VAULT_ROOT, "/etc/passwd");
-      expect(sp.relative).toBe("etc/passwd.md");
-      expect(sp.absolute).toBe("/vault/etc/passwd.md");
+    it("rejects absolute-looking paths (leading / is not stripped silently)", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "/etc/passwd")).toThrow(
+        AbsolutePathError,
+      );
     });
   });
 
@@ -124,6 +124,50 @@ describe("SafePath", () => {
       expect(() => SafePath.create(VAULT_ROOT, "   ")).toThrow(
         InvalidNotePathError,
       );
+    });
+  });
+
+  describe("absolute path rejection", () => {
+    it("rejects POSIX absolute path /etc/passwd", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "/etc/passwd")).toThrow(AbsolutePathError);
+    });
+
+    it("rejects root path /", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "/")).toThrow(AbsolutePathError);
+    });
+
+    it("rejects triple-slash ///foo", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "///foo")).toThrow(AbsolutePathError);
+    });
+
+    it("rejects Windows drive letter C:\\Windows\\system32", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "C:\\Windows\\system32")).toThrow(AbsolutePathError);
+    });
+
+    it("rejects Windows drive letter C:/Users/file.md", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "C:/Users/file.md")).toThrow(AbsolutePathError);
+    });
+
+    it("rejects UNC path \\\\server\\share\\file.md", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "\\\\server\\share\\file.md")).toThrow(AbsolutePathError);
+    });
+
+    it("rejects UNC path //server/share", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "//server/share")).toThrow(AbsolutePathError);
+    });
+
+    it("rejects URL-encoded absolute %2Fetc%2Fpasswd", () => {
+      expect(() => SafePath.create(VAULT_ROOT, "%2Fetc%2Fpasswd")).toThrow(AbsolutePathError);
+    });
+
+    it("still accepts valid relative paths (no regression)", () => {
+      const sp = SafePath.create(VAULT_ROOT, "notes/valid.md");
+      expect(sp.relative).toBe("notes/valid.md");
+    });
+
+    it("still accepts nested relative paths (no regression)", () => {
+      const sp = SafePath.create(VAULT_ROOT, "sub/dir/file.md");
+      expect(sp.relative).toBe("sub/dir/file.md");
     });
   });
 });

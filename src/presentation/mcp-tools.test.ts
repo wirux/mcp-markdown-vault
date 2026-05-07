@@ -6,7 +6,8 @@ import { createMcpServer, type McpDependencies } from "./mcp-tools.js";
 import { LocalFileSystemAdapter } from "../infrastructure/local-fs-adapter.js";
 import { InMemoryVectorStore } from "../infrastructure/vector-store/in-memory-vector-store.js";
 import { WorkflowStateMachine } from "../use-cases/workflow-state.js";
-import type { IEmbeddingProvider } from "../domain/interfaces/index.js";
+import { VaultIndexer } from "../use-cases/vault-indexer.js";
+import type { IEmbeddingProvider, IFileWatcher, WatchEventType } from "../domain/interfaces/index.js";
 import { MarkdownPipeline } from "../use-cases/markdown-pipeline.js";
 import { BacklinkIndexService } from "../use-cases/backlink-index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -23,6 +24,12 @@ class FakeEmbedder implements IEmbeddingProvider {
   async embedBatch(texts: string[]): Promise<number[][]> {
     return Promise.all(texts.map((t) => this.embed(t)));
   }
+}
+
+class StubFileWatcher implements IFileWatcher {
+  watch(): void {}
+  on(_event: WatchEventType, _handler: (_path: string) => void): void {}
+  async close(): Promise<void> {}
 }
 
 // ── Test setup ────────────────────────────────────────────────────
@@ -527,10 +534,10 @@ describe("system tool", () => {
     });
     const content = result.content as Array<{ type: string; text: string }>;
     const parsed = JSON.parse(content[0]!.text);
-    expect(parsed.result.vaultRoot).toBe(tmpDir);
     expect(typeof parsed.result.indexedDocuments).toBe("number");
     expect(typeof parsed.result.backlinkIndexSize).toBe("number");
     expect(parsed.result.backlinkIndexSize).toBeGreaterThan(0);
+    expect(parsed.result.vaultRoot).toBeUndefined();
   });
 
   it("returns vault overview with folder structure", async () => {
@@ -553,5 +560,99 @@ describe("system tool", () => {
     const daily = root.children.find((f: { path: string }) => f.path === "daily");
     expect(daily).toBeDefined();
     expect(daily.fileCount).toBe(1);
+  });
+});
+
+describe("system tool — indexer health fields", () => {
+  let indexerTmpDir: string;
+  let indexerClient: Client;
+  let indexerCleanup: () => Promise<void>;
+
+  beforeEach(async () => {
+    indexerTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "mcp-indexer-test-"));
+    await fs.writeFile(
+      path.join(indexerTmpDir, "note.md"),
+      "# Note\n\nContent.\n",
+    );
+
+    const fsAdapter = await LocalFileSystemAdapter.create(indexerTmpDir);
+    const vectorStore = new InMemoryVectorStore();
+    const embedder = new FakeEmbedder();
+    const workflow = new WorkflowStateMachine();
+    const indexer = new VaultIndexer(
+      indexerTmpDir,
+      vectorStore,
+      embedder,
+      new StubFileWatcher(),
+      fsAdapter,
+    );
+
+    const indexerDeps: McpDependencies = {
+      fsAdapter,
+      vectorStore,
+      embedder,
+      workflow,
+      vaultRoot: indexerTmpDir,
+      indexer,
+    };
+
+    const server = createMcpServer(indexerDeps);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    indexerClient = new Client({ name: "test-indexer-client", version: "1.0.0" });
+    await server.connect(serverTransport);
+    await indexerClient.connect(clientTransport);
+
+    indexerCleanup = async () => {
+      await indexerClient.close();
+      await server.close();
+    };
+  });
+
+  afterEach(async () => {
+    await indexerCleanup();
+    await fs.rm(indexerTmpDir, { recursive: true, force: true });
+  });
+
+  it("includes indexing health fields in status response", async () => {
+    const result = await indexerClient.callTool({
+      name: "system",
+      arguments: { action: "status" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.indexingState).toBeDefined();
+    expect(["idle", "indexing", "watching", "error"]).toContain(parsed.result.indexingState);
+    expect(parsed.result.watcherState).toBeDefined();
+    expect(["stopped", "active"]).toContain(parsed.result.watcherState);
+    expect(typeof parsed.result.queueDepth).toBe("number");
+    expect(typeof parsed.result.failureCount).toBe("number");
+    expect(typeof parsed.result.indexedDocuments).toBe("number");
+  });
+
+  it("returns idle indexingState when watcher is not started", async () => {
+    const result = await indexerClient.callTool({
+      name: "system",
+      arguments: { action: "status" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.indexingState).toBe("idle");
+    expect(parsed.result.watcherState).toBe("stopped");
+    expect(parsed.result.failureCount).toBe(0);
+    expect(parsed.result.lastFailure).toBeNull();
+  });
+
+  it("does not expose vault root absolute path", async () => {
+    const result = await indexerClient.callTool({
+      name: "system",
+      arguments: { action: "status" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text);
+
+    expect(parsed.result.vaultRoot).toBeUndefined();
+    expect(JSON.stringify(parsed.result)).not.toContain(indexerTmpDir);
   });
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { LocalFileSystemAdapter } from "./infrastructure/local-fs-adapter.js";
+import { ChokidarFileWatcher } from "./infrastructure/chokidar-file-watcher.js";
 import { createVectorStore } from "./infrastructure/vector-store-factory.js";
 import { OllamaEmbeddingProvider } from "./infrastructure/ollama-embedding.js";
 import { TransformersEmbeddingProvider } from "./infrastructure/transformers-embedding.js";
@@ -72,6 +73,8 @@ async function main(): Promise<void> {
   );
   const port = parseInt(process.env["PORT"] ?? "3000", 10);
   const authToken = process.env["MCP_AUTH_TOKEN"];
+  const hostBindAddress = process.env["HOST_BIND_ADDRESS"] ?? "127.0.0.1";
+  const bodyLimit = process.env["BODY_LIMIT_BYTES"] ?? "1mb";
   const ollamaUrl = process.env["OLLAMA_URL"];
   const ollamaModel = process.env["OLLAMA_MODEL"] ?? "nomic-embed-text";
   const qdrantUrl = process.env["VECTOR_STORE_URL"];
@@ -108,7 +111,14 @@ async function main(): Promise<void> {
   const backlinkIndex = new BacklinkIndexService(new MarkdownPipeline());
 
   // Start background indexing (shared across all connections)
-  const indexer = new VaultIndexer(vaultRoot, vectorStore, embedder);
+  const fileWatcher = new ChokidarFileWatcher();
+  const indexer = new VaultIndexer(
+    vaultRoot,
+    vectorStore,
+    embedder,
+    fileWatcher,
+    fsAdapter,
+  );
 
   // Wire watcher callbacks to backlink index
   indexer.setOnFileIndexed((relPath, content) => {
@@ -163,6 +173,8 @@ async function main(): Promise<void> {
   const handle = await startTransport(transportType, serverFactory, {
     port,
     authToken,
+    hostBindAddress,
+    bodyLimit,
   });
 
   // Handle shutdown
