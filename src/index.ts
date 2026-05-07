@@ -71,6 +71,7 @@ async function main(): Promise<void> {
     process.env["MCP_TRANSPORT_TYPE"],
   );
   const port = parseInt(process.env["PORT"] ?? "3000", 10);
+  const authToken = process.env["MCP_AUTH_TOKEN"];
   const ollamaUrl = process.env["OLLAMA_URL"];
   const ollamaModel = process.env["OLLAMA_MODEL"] ?? "nomic-embed-text";
   const qdrantUrl = process.env["VECTOR_STORE_URL"];
@@ -156,8 +157,12 @@ async function main(): Promise<void> {
 
   // Connect via selected transport
   console.error(`Transport: ${transportType}`);
+  if (authToken) {
+    console.error("Bearer auth: enabled");
+  }
   const handle = await startTransport(transportType, serverFactory, {
     port,
+    authToken,
   });
 
   // Handle shutdown

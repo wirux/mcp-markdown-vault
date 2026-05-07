@@ -4,6 +4,7 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
 import cors from "cors";
 import type { Server as HttpServer } from "node:http";
+import { createBearerAuthMiddleware } from "./auth-middleware.js";
 
 export type TransportType = "stdio" | "sse";
 
@@ -16,6 +17,10 @@ export function parseTransportType(value?: string): TransportType {
   throw new Error(
     `Invalid MCP_TRANSPORT_TYPE: "${value}". Must be "stdio" or "sse".`,
   );
+}
+
+export interface SseAppOptions {
+  authToken?: string | undefined;
 }
 
 export interface SseApp {
@@ -31,11 +36,21 @@ export interface SseApp {
  *
  * Each GET /sse connection gets its own McpServer instance (via serverFactory)
  * so workflow state is isolated per client.
+ *
+ * When `authToken` is provided, all endpoints require `Authorization: Bearer <token>`.
  */
-export function createSseApp(serverFactory: () => McpServer): SseApp {
+export function createSseApp(
+  serverFactory: () => McpServer,
+  options?: SseAppOptions,
+): SseApp {
   const app = express();
   app.use(cors());
   app.use(express.json());
+
+  const authMiddleware = createBearerAuthMiddleware(options?.authToken);
+  if (authMiddleware) {
+    app.use(authMiddleware);
+  }
 
   const sessions = new Map<string, SSEServerTransport>();
 
@@ -90,7 +105,7 @@ export interface TransportHandle {
 export async function startTransport(
   type: TransportType,
   serverFactory: () => McpServer,
-  options?: { port?: number | undefined },
+  options?: { port?: number | undefined; authToken?: string | undefined },
 ): Promise<TransportHandle> {
   if (type === "stdio") {
     const server = serverFactory();
@@ -103,8 +118,9 @@ export async function startTransport(
     };
   }
 
-  // SSE transport
-  const { app, sessions } = createSseApp(serverFactory);
+  const { app, sessions } = createSseApp(serverFactory, {
+    authToken: options?.authToken,
+  });
   const port = options?.port ?? 3000;
 
   const httpServer: HttpServer = await new Promise((resolve) => {
