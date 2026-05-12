@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { pathToFileURL } from "node:url";
 import { LocalFileSystemAdapter } from "./infrastructure/local-fs-adapter.js";
 import { ChokidarFileWatcher } from "./infrastructure/chokidar-file-watcher.js";
 import { createVectorStore } from "./infrastructure/vector-store-factory.js";
@@ -11,15 +12,78 @@ import {
   StartupError,
 } from "./infrastructure/startup-checks.js";
 import type { IEmbeddingProvider } from "./domain/interfaces/index.js";
+import type { IFileSystemAdapter } from "./domain/interfaces/file-system-adapter.js";
 import { WorkflowStateMachine } from "./use-cases/workflow-state.js";
 import { VaultIndexer } from "./use-cases/vault-indexer.js";
 import { BacklinkIndexService } from "./use-cases/backlink-index.js";
 import { MarkdownPipeline } from "./use-cases/markdown-pipeline.js";
-import { createMcpServer } from "./presentation/mcp-tools.js";
+import { VaultAutoInitService, type AutoInitResult } from "./use-cases/vault-auto-init.js";
+import { composeInstructions } from "./use-cases/instructions-composer.js";
+import { createMcpServer, type McpDependencies } from "./presentation/mcp-tools.js";
 import {
   parseTransportType,
   startTransport,
 } from "./presentation/transport.js";
+
+export const DEFAULT_VAULT_CONTEXT = "general markdown notes vault";
+
+export function readVaultContext(env: NodeJS.ProcessEnv = process.env): string {
+  return env["VAULT_CONTEXT"] || DEFAULT_VAULT_CONTEXT;
+}
+
+export interface VaultOrientation {
+  initResult: AutoInitResult;
+  vaultScope: string;
+  instructions: string;
+}
+
+export async function initializeVaultOrientation(deps: {
+  fsAdapter: IFileSystemAdapter;
+  vaultContext: string;
+  logger?: Pick<Console, "error">;
+}): Promise<VaultOrientation> {
+  const logger = deps.logger ?? console;
+  const autoInit = new VaultAutoInitService({
+    fsAdapter: deps.fsAdapter,
+    vaultContext: deps.vaultContext,
+  });
+  const initResult = await autoInit.initialize().catch((err: unknown) => {
+    logger.error("Vault auto-init failed:", err);
+    return {
+      contractCreated: false,
+      overviewCreated: false,
+      warnings: [],
+    } satisfies AutoInitResult;
+  });
+
+  if (initResult.contractCreated) {
+    logger.error("meta/contract.md created");
+  }
+  if (initResult.overviewCreated) {
+    logger.error("meta/overview.md created");
+  }
+  for (const warning of initResult.warnings) {
+    logger.error(`[warn] ${warning}`);
+  }
+
+  const vaultScope = deps.vaultContext.trim() || DEFAULT_VAULT_CONTEXT;
+
+  return {
+    initResult,
+    vaultScope,
+    instructions: composeInstructions(vaultScope),
+  };
+}
+
+export function createServerFactory(
+  deps: Omit<McpDependencies, "workflow">,
+): () => ReturnType<typeof createMcpServer> {
+  return () =>
+    createMcpServer({
+      ...deps,
+      workflow: new WorkflowStateMachine(),
+    });
+}
 
 /**
  * Strategy: pick the embedding provider based on environment.
@@ -68,6 +132,7 @@ async function createEmbeddingProvider(): Promise<IEmbeddingProvider> {
 
 async function main(): Promise<void> {
   const vaultRoot = process.env["VAULT_PATH"] ?? "/vault";
+  const vaultContext = readVaultContext();
   const transportType = parseTransportType(
     process.env["MCP_TRANSPORT_TYPE"],
   );
@@ -84,6 +149,10 @@ async function main(): Promise<void> {
 
   // Shared dependencies (reused across all client connections)
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
+  const { vaultScope, instructions } = await initializeVaultOrientation({
+    fsAdapter,
+    vaultContext,
+  });
 
   // ── Startup health checks ──────────────────────────────────────
   if (ollamaUrl !== undefined) {
@@ -130,16 +199,16 @@ async function main(): Promise<void> {
 
   // Server factory: each connection gets its own McpServer + WorkflowStateMachine.
   // Shared deps (fs, vectors, embedder, backlinkIndex, indexer) are captured by closure.
-  const serverFactory = () =>
-    createMcpServer({
-      fsAdapter,
-      vectorStore,
-      embedder,
-      workflow: new WorkflowStateMachine(),
-      vaultRoot,
-      backlinkIndex,
-      indexer,
-    });
+  const serverFactory = createServerFactory({
+    fsAdapter,
+    vectorStore,
+    embedder,
+    vaultRoot,
+    backlinkIndex,
+    indexer,
+    instructions,
+    vaultScope,
+  });
 
   // Vector indexing + backlinks on startup
   indexer
@@ -193,12 +262,23 @@ async function main(): Promise<void> {
   }, 60_000).unref();
 }
 
-main().catch((err) => {
-  if (err instanceof StartupError) {
-    console.error(`\nStartup check failed: ${err.message}`);
-    console.error(`  → ${err.hint}\n`);
-  } else {
-    console.error("Fatal:", err);
+function isDirectExecution(): boolean {
+  const entryPoint = process.argv[1];
+  if (!entryPoint) {
+    return false;
   }
-  process.exit(1);
-});
+
+  return import.meta.url === pathToFileURL(entryPoint).href;
+}
+
+if (isDirectExecution()) {
+  main().catch((err) => {
+    if (err instanceof StartupError) {
+      console.error(`\nStartup check failed: ${err.message}`);
+      console.error(`  → ${err.hint}\n`);
+    } else {
+      console.error("Fatal:", err);
+    }
+    process.exit(1);
+  });
+}
