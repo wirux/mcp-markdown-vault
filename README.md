@@ -15,7 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-342%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-516%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
 [![mcp-markdown-vault MCP server](https://glama.ai/mcp/servers/wirux/mcp-markdown-vault/badges/score.svg)](https://glama.ai/mcp/servers/wirux/mcp-markdown-vault)
 
 </div>
@@ -195,6 +195,7 @@ The server selects an embedding provider automatically:
 | Variable | Default | Description |
 |---|---|---|
 | `VAULT_PATH` | `/vault` | Markdown vault directory |
+| `VAULT_CONTEXT` | `general markdown notes vault` | One-line description of vault scope; surfaced to connected agents via MCP instructions and tool descriptions |
 | `MCP_TRANSPORT_TYPE` | `stdio` | `stdio` (single client) or `sse` (multi-client HTTP) |
 | `PORT` | `3000` | HTTP port (SSE mode only) |
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings |
@@ -223,6 +224,88 @@ See [CLAUDE.md](CLAUDE.md) for detailed architecture docs and [CHANGELOG.md](CHA
 
 ---
 
+## Self-Orienting Context Layer
+
+When an MCP client connects, the server automatically provides vault context so connected agents can decide **when** to query this vault and **how** to use its tools — without explicit user instructions.
+
+### Making agents find your vault
+
+The single most important thing: **set `VAULT_CONTEXT` to describe what your vault contains.**
+
+```json
+{
+  "mcpServers": {
+    "markdown-vault": {
+      "command": "npx",
+      "args": ["-y", "@wirux/mcp-markdown-vault"],
+      "env": {
+        "VAULT_PATH": "/path/to/your/vault",
+        "VAULT_CONTEXT": "personal research notes on machine learning and distributed systems"
+      }
+    }
+  }
+}
+```
+
+This one-line description is injected into the MCP handshake, the `view` tool description, and resource headers. When a user asks the agent something related to "machine learning" or "distributed systems", the agent sees the scope match and queries the vault autonomously.
+
+Default: `general markdown notes vault` (too generic for reliable routing — always set a specific value).
+
+### How context is delivered
+
+The server uses four complementary mechanisms so behavior degrades gracefully across clients with different MCP feature support:
+
+| Mechanism | When | What the agent sees |
+|---|---|---|
+| **`instructions` field** | MCP handshake (session start) | Vault scope + tool dispatcher summary. Supported by Claude Desktop, Claude Code, Cursor. |
+| **MCP Resources** | On-demand via `ReadResource` | `vault://overview` (composed view with live stats + contract + overview), `vault://contract` (raw contract), `vault://stats` (live JSON) |
+| **First-call priming** | First `view` tool call per session | `_meta.vault_orientation` block with scope + hint to read `vault://overview` |
+| **`view` tool description** | Tool listing | Includes the `VAULT_CONTEXT` scope string for tool-selection matching |
+
+Even if a client supports none of these (rare), the agent still discovers vault content through normal tool use.
+
+### Two files: contract vs overview
+
+On first startup, the server creates two files in `<VAULT_PATH>/meta/`. Both are created once and **never overwritten** — they are fully yours to edit.
+
+#### `meta/contract.md` — Tool optimization (power users)
+
+Tells agents **how** to use the vault's tools efficiently. Pre-filled with sensible defaults:
+
+| Section | Purpose | Drives which tool |
+|---|---|---|
+| `## Frontmatter Schema` | YAML keys and types used across notes | `view.frontmatter_get`, `edit.frontmatter_set` |
+| `## Tag Conventions` | Tag naming rules and hierarchies | `view.global_search` query building |
+| `## Search Hints` | Which search action fits which query type | All `view` actions |
+| `## Naming Conventions` | File naming patterns | `vault.create` |
+| `## Note Template` | Default structure for new notes | `vault.create`, `vault.create_from_template` |
+
+Most users don't need to edit this. Power users can customize it to match their vault's specific conventions — agents read it via `vault://overview` and `vault://contract` resources on each request.
+
+> **Tip:** Add a `## Scope` section for a richer, multi-line vault description. Agents see it when reading `vault://overview` or `vault://contract` resources.
+
+#### `meta/overview.md` — Vault narrative (all users)
+
+Free-form description of **what** the vault currently contains. Created as an empty stub. Write here whatever helps an agent understand your vault's content: active projects, key topic areas, organizational philosophy.
+
+If the body is non-empty, its content is appended to the `vault://overview` resource that agents can read on demand.
+
+### Hot reload behavior
+
+| What changed | Effect | Restart needed? |
+|---|---|---|
+| `meta/contract.md` | Reflected in `vault://overview` and `vault://contract` on next read | No |
+| `meta/overview.md` | Reflected in `vault://overview` on next read | No |
+| `VAULT_CONTEXT` env var | Reflected in `instructions` field and `view` tool description | Yes |
+
+### Migration notes
+
+On first run after upgrade, `meta/contract.md` and `meta/overview.md` are auto-created if missing. Existing files are never overwritten. No breaking changes to tool APIs.
+
+If you have a `meta/contract.md` from other tooling with a different schema, review compatibility — the server-generated contract is dedicated to mcp-markdown-vault navigation hints.
+
+---
+
 ## 🚢 CI/CD & Release
 
 Fully automated via GitHub Actions and [Semantic Release](https://semantic-release.gitbook.io/):
@@ -241,7 +324,7 @@ Fully automated via GitHub Actions and [Semantic Release](https://semantic-relea
 
 ## 🧪 Testing
 
-**318 tests** across 31 files, written test-first (TDD).
+**516 tests** across 46 files, written test-first (TDD).
 
 ```bash
 npm test                                          # Run all tests

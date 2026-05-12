@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ServerOptions } from "@modelcontextprotocol/sdk/server/index.js";
 import { z } from "zod";
 import type { IFileSystemAdapter } from "../domain/interfaces/file-system-adapter.js";
 import type { IEmbeddingProvider, IVectorStore } from "../domain/interfaces/index.js";
@@ -25,7 +26,9 @@ import { VaultIndexer } from "../use-cases/vault-indexer.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
-import { DomainError, InvalidArgumentError } from "../domain/errors/index.js";
+import { DomainError, InvalidArgumentError, NoteNotFoundError } from "../domain/errors/index.js";
+import { VaultStatsComposer } from "../use-cases/vault-stats.js";
+import { VaultOverviewResourceComposer } from "../use-cases/vault-resource-overview.js";
 
 export interface McpDependencies {
   fsAdapter: IFileSystemAdapter;
@@ -35,19 +38,78 @@ export interface McpDependencies {
   vaultRoot: string;
   backlinkIndex?: BacklinkIndexService | undefined;
   indexer?: VaultIndexer | undefined;
+  instructions?: string | undefined;
+  vaultScope?: string | undefined;
 }
 
 /**
  * Creates and configures the MCP server with all 5 semantic tools.
  */
 export function createMcpServer(deps: McpDependencies): McpServer {
-  const server = new McpServer({
-    name: "markdown-vault-mcp",
-    version: "0.1.0",
-  });
+  let serverOptions: ServerOptions | undefined;
+  if (deps.instructions) {
+    serverOptions = { instructions: deps.instructions };
+  }
+  const server = new McpServer(
+    { name: "markdown-vault-mcp", version: "0.1.0" },
+    serverOptions,
+  );
 
   const pipeline = new MarkdownPipeline();
   const retriever = new FragmentRetriever(pipeline);
+
+  const statsComposerDeps: ConstructorParameters<typeof VaultStatsComposer>[0] = {
+    fsAdapter: deps.fsAdapter,
+    embedder: deps.embedder,
+  };
+  if (deps.indexer) {
+    statsComposerDeps.indexer = deps.indexer;
+  }
+  const statsComposer = new VaultStatsComposer(statsComposerDeps);
+  const overviewComposer = new VaultOverviewResourceComposer({
+    fsAdapter: deps.fsAdapter,
+    statsComposer,
+    vaultScope: deps.vaultScope ?? "general markdown notes vault",
+  });
+
+  server.registerResource(
+    "vault-overview",
+    "vault://overview",
+    { title: "Vault Overview", description: "Vault scope, live stats, navigation contract, and overview.", mimeType: "text/markdown" },
+    async () => {
+      const text = await overviewComposer.compose();
+      return { contents: [{ uri: "vault://overview", text, mimeType: "text/markdown" }] };
+    },
+  );
+
+  server.registerResource(
+    "vault-contract",
+    "vault://contract",
+    { title: "Vault Contract", description: "Raw vault navigation contract (meta/contract.md).", mimeType: "text/markdown" },
+    async () => {
+      try {
+        const text = await deps.fsAdapter.readNote("meta/contract.md");
+        return { contents: [{ uri: "vault://contract", text, mimeType: "text/markdown" }] };
+      } catch (err) {
+        if (err instanceof NoteNotFoundError) {
+          return { contents: [{ uri: "vault://contract", text: "meta/contract.md not found.", mimeType: "text/markdown" }] };
+        }
+        throw err;
+      }
+    },
+  );
+
+  server.registerResource(
+    "vault-stats",
+    "vault://stats",
+    { title: "Vault Stats", description: "Live vault statistics as JSON.", mimeType: "application/json" },
+    async () => {
+      const stats = await statsComposer.computeStats();
+      return { contents: [{ uri: "vault://stats", text: JSON.stringify(stats), mimeType: "application/json" }] };
+    },
+  );
+
+  let firstViewCall = true;
 
   // ── vault tool ──────────────────────────────────────────────────
 
@@ -299,7 +361,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      "View and search notes. Actions: search (single-file fragment retrieval), global_search (cross-vault keyword search), semantic_search (cross-vault vector+lexical hybrid), outline (heading structure), read (full content or by heading), frontmatter_get (read YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).",
+      `Read and search markdown notes. Vault scope: ${deps.vaultScope ?? "general markdown notes vault"}.\nActions: search (heading-aware fragment retrieval with TF-IDF + proximity), semantic_search (vector + lexical hybrid for conceptual queries), global_search (cross-vault exact-match grep), outline (file or directory structure tree), read (full file or single section by heading), frontmatter_get (parse YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).`,
     inputSchema: {
       action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read", "backlinks"]),
       path: z.string().optional(),
@@ -316,7 +378,11 @@ export function createMcpServer(deps: McpDependencies): McpServer {
     },
   }, async ({ action, path: notePath, query, maxChunks, heading, headingDepth, directory, items }) => {
     return wrapTool(deps.workflow, "view", async () => {
-      switch (action) {
+      const isPriming = firstViewCall;
+      if (firstViewCall) firstViewCall = false;
+
+      const actionResult = await (async () => {
+        switch (action) {
         case "search": {
           if (!notePath) throw new InvalidArgumentError("path");
           if (!query) throw new InvalidArgumentError("query");
@@ -408,7 +474,21 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         }
         default:
           throw new InvalidArgumentError("action");
+        }
+      })();
+
+      if (isPriming) {
+        return Object.assign({}, actionResult as object, {
+          _meta: {
+            vault_orientation: {
+              scope: deps.vaultScope ?? "general markdown notes vault",
+              hint: "Read vault://overview resource or meta/contract.md for full conventions.",
+            },
+          },
+        });
       }
+
+      return actionResult;
     });
   });
 

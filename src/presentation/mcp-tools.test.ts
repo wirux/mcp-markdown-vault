@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import fs from "node:fs/promises";
-import path from "node:path";
-import os from "node:os";
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
 import { createMcpServer, type McpDependencies } from "./mcp-tools.js";
 import { LocalFileSystemAdapter } from "../infrastructure/local-fs-adapter.js";
 import { InMemoryVectorStore } from "../infrastructure/vector-store/in-memory-vector-store.js";
@@ -13,10 +13,25 @@ import { BacklinkIndexService } from "../use-cases/backlink-index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
+type TextResource = { uri: string; text: string; mimeType?: string };
+
+function getTextResourceContent(resource: unknown): TextResource {
+  if (
+    typeof resource === "object"
+    && resource !== null
+    && "text" in resource
+    && typeof (resource as { text: unknown }).text === "string"
+  ) {
+    return resource as TextResource;
+  }
+  throw new Error("Expected text resource content");
+}
+
 // ── Fake embedding provider ──────────────────────────────────────
 
 class FakeEmbedder implements IEmbeddingProvider {
   readonly dimensions = 3;
+  readonly modelName = "fake";
   async embed(text: string): Promise<number[]> {
     const h = [...text].reduce((s, c) => ((s << 5) - s + c.charCodeAt(0)) | 0, 0);
     return [Math.sin(h), Math.cos(h), Math.sin(h * 2)];
@@ -66,7 +81,16 @@ beforeEach(async () => {
     { path: "daily/2024-01-01.md", content: "# Daily Note\n\nToday I learned about MCP. See [[hello]].\n" },
   ]);
 
-  deps = { fsAdapter, vectorStore, embedder, workflow, vaultRoot: tmpDir, backlinkIndex };
+  deps = {
+    fsAdapter,
+    vectorStore,
+    embedder,
+    workflow,
+    vaultRoot: tmpDir,
+    backlinkIndex,
+    instructions: "test instructions",
+    vaultScope: "test vault",
+  };
 
   const server = createMcpServer(deps);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -106,6 +130,103 @@ describe("MCP Server — tool listing", () => {
     for (const tool of result.tools) {
       expect(tool.description).toBeTruthy();
     }
+  });
+
+  it("view tool description includes vault scope text", async () => {
+    const result = await client.listTools();
+    const viewTool = result.tools.find((tool) => tool.name === "view");
+    expect(viewTool?.description).toContain("Vault scope: test vault");
+  });
+});
+
+describe("MCP Server — resources and priming", () => {
+  it("listResources returns 3 resources with expected URIs", async () => {
+    const result = await client.listResources();
+    const uris = result.resources.map((resource) => resource.uri).sort();
+    expect(uris).toEqual(["vault://contract", "vault://overview", "vault://stats"]);
+  });
+
+  it("readResource overview returns markdown starting with vault heading", async () => {
+    await fs.mkdir(path.join(tmpDir, "meta"), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, "meta/overview.md"),
+      "---\ntitle: Overview\n---\n\n# Overview\n\nHelpful overview content.\n",
+    );
+
+    const result = await client.readResource({ uri: "vault://overview" });
+    const content = result.contents[0];
+    expect(content).toBeDefined();
+    expect(getTextResourceContent(content).text.startsWith("# Vault:")).toBe(true);
+  });
+
+  it("readResource contract returns contract.md content", async () => {
+    await fs.mkdir(path.join(tmpDir, "meta"), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, "meta/contract.md"),
+      "# Contract\n\nVault contract content.\n",
+    );
+
+    const result = await client.readResource({ uri: "vault://contract" });
+    const content = result.contents[0];
+    expect(content).toBeDefined();
+    expect(getTextResourceContent(content).text).toBe("# Contract\n\nVault contract content.\n");
+  });
+
+  it("readResource stats returns valid JSON with expected fields", async () => {
+    const result = await client.readResource({ uri: "vault://stats" });
+    const content = result.contents[0];
+    expect(content).toBeDefined();
+    const parsed = JSON.parse(getTextResourceContent(content).text) as {
+      fileCount: number;
+      indexStatus: string;
+      embeddingProvider: string;
+    };
+
+    expect(parsed.fileCount).toBe(2);
+    expect(parsed.indexStatus).toBe("not started");
+    expect(parsed.embeddingProvider).toBe("fake");
+  });
+
+  it("first view tool call returns vault orientation priming metadata", async () => {
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+
+    expect(parsed.result._meta.vault_orientation).toEqual({
+      scope: "test vault",
+      hint: "Read vault://overview resource or meta/contract.md for full conventions.",
+    });
+  });
+
+  it("second view tool call does not return vault orientation priming metadata", async () => {
+    await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+
+    const secondResult = await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+    const parsed = JSON.parse((secondResult.content as Array<{ type: string; text: string }>)[0]!.text);
+
+    expect(parsed.result._meta).toBeUndefined();
+  });
+
+  it("vault tool first call does not return vault orientation priming metadata", async () => {
+    const result = await client.callTool({
+      name: "vault",
+      arguments: { action: "list" },
+    });
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+
+    expect(parsed.result._meta).toBeUndefined();
+  });
+
+  it("server initialization result includes non-empty instructions", () => {
+    expect(client.getInstructions()).toBe("test instructions");
   });
 });
 
@@ -179,6 +300,13 @@ describe("vault tool", () => {
 // ── view tool ─────────────────────────────────────────────────────
 
 describe("view tool", () => {
+  beforeEach(async () => {
+    await client.callTool({
+      name: "view",
+      arguments: { action: "backlinks", path: "hello.md" },
+    });
+  });
+
   it("retrieves fragments for a query", async () => {
     const result = await client.callTool({
       name: "view",
