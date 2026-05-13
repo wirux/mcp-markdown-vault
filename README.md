@@ -257,7 +257,7 @@ The server uses four complementary mechanisms so behavior degrades gracefully ac
 | Mechanism | When | What the agent sees |
 |---|---|---|
 | **`instructions` field** | MCP handshake (session start) | Vault scope + tool dispatcher summary. Supported by Claude Desktop, Claude Code, Cursor. |
-| **MCP Resources** | On-demand via `ReadResource` | `vault://overview` (composed view with live stats + contract + overview), `vault://contract` (raw contract), `vault://stats` (live JSON) |
+| **MCP Resources** | On-demand via `ReadResource` | `vault://overview` (composed view with live stats, overview, and conventions), `vault://stats` (live JSON) |
 | **First-call priming** | First `view` tool call per session | `_meta.vault_orientation` block with scope + hint to read `vault://overview` |
 | **`view` tool description** | Tool listing | Includes the vault scope string from `meta/overview.md` for tool-selection matching |
 
@@ -279,9 +279,9 @@ Tells agents **how** to use the vault's tools efficiently. Pre-filled with sensi
 | `## Naming Conventions` | File naming patterns | `vault.create` |
 | `## Note Template` | Default structure for new notes | `vault.create`, `vault.create_from_template` |
 
-Most users don't need to edit this. Power users can customize it to match their vault's specific conventions — agents read it via `vault://contract` resource on each request.
+Most users don't need to edit this. Power users can customize it to match their vault's specific conventions — agents read it as part of the `vault://overview` resource.
 
-> **Tip:** Add a `## Scope` section for a richer, multi-line vault description. Agents see it when reading `vault://overview` or `vault://contract` resources.
+> **Tip:** Add a `## Scope` section for a richer, multi-line vault description. Agents see it when reading the `vault://overview` resource.
 
 #### `meta/overview.md` — Vault description (read-side)
 
@@ -295,7 +295,7 @@ Its content is the primary source for the `vault://overview` resource that agent
 
 | What changed | Effect | Restart needed? |
 |---|---|---|
-| `meta/contract.md` | Reflected in `vault://contract` on next read | No |
+| `meta/contract.md` | Reflected in `vault://overview` on next read | No |
 | `meta/overview.md` | Reflected in `vault://overview` on next read | No |
 | `VAULT_CONTEXT_MODE` env var | Changes auto vs manual behavior | Yes |
 
