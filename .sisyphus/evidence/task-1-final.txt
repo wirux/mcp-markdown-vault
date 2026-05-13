@@ -1,5 +1,0 @@
- RUN  v4.1.4 /Users/adamwilczek/Documents/playground/mcp-markdown-vault
- Test Files  1 passed (1)
-      Tests  26 passed (26)
-   Start at  11:49:57
-   Duration  1.40s (transform 52ms, setup 0ms, import 141ms, tests 1.12s, environment 0ms)
