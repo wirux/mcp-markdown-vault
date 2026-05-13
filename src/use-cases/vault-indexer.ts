@@ -14,6 +14,11 @@ export interface WatcherOptions {
   debounceMs?: number;
 }
 
+export interface VaultIndexerOptions {
+  /** Meaningful-change threshold that triggers threshold subscribers. Default: 5. */
+  threshold?: number;
+}
+
 /** Snapshot of the indexer's current health and operational state. */
 export interface IndexingHealthStatus {
   /** Derived state priority: 'indexing' > 'watching' > 'error' > 'idle'. */
@@ -41,12 +46,19 @@ export class VaultIndexer {
   private readonly watcherAdapter: IFileWatcher;
   private readonly fs: IFileSystemAdapter;
   private readonly chunker: MarkdownChunker;
+  private readonly threshold: number;
   private watcherActive = false;
 
-  /** Callback invoked after a file is successfully indexed. */
-  private onFileIndexedCb?: (relativePath: string, content: string) => void;
-  /** Callback invoked after a file is removed from the index. */
-  private onFileRemovedCb?: (relativePath: string) => void;
+  /** Callbacks invoked after a file is successfully indexed. */
+  private readonly onFileIndexedCbs: Array<
+    (relativePath: string, content: string) => void
+  > = [];
+  /** Callbacks invoked after a file is removed from the index. */
+  private readonly onFileRemovedCbs: Array<(relativePath: string) => void> = [];
+  /** Callbacks invoked when the meaningful change threshold is reached. */
+  private readonly onThresholdReachedCbs: Array<() => void> = [];
+  /** Count of meaningful non-meta changes since last threshold/reset. */
+  private meaningfulChangeCount = 0;
 
   /** Set of vault-relative paths pending indexing. */
   private readonly queue = new Set<string>();
@@ -69,6 +81,7 @@ export class VaultIndexer {
     embedder: IEmbeddingProvider,
     watcher: IFileWatcher,
     fs: IFileSystemAdapter,
+    options?: VaultIndexerOptions,
   ) {
     this.vaultRoot = path.resolve(vaultRoot);
     this.store = store;
@@ -76,16 +89,42 @@ export class VaultIndexer {
     this.watcherAdapter = watcher;
     this.fs = fs;
     this.chunker = new MarkdownChunker(new MarkdownPipeline());
+    this.threshold = options?.threshold ?? 5;
   }
 
   /** Registers a callback invoked after a file is successfully indexed. */
-  setOnFileIndexed(cb: (relativePath: string, content: string) => void): void {
-    this.onFileIndexedCb = cb;
+  addOnFileIndexed(cb: (relativePath: string, content: string) => void): void {
+    this.onFileIndexedCbs.push(cb);
   }
 
   /** Registers a callback invoked after a file is removed from the index. */
+  addOnFileRemoved(cb: (relativePath: string) => void): void {
+    this.onFileRemovedCbs.push(cb);
+  }
+
+  /** Registers a callback invoked when the meaningful change threshold is reached. */
+  addOnThresholdReached(cb: () => void): void {
+    this.onThresholdReachedCbs.push(cb);
+  }
+
+  /** @deprecated Use addOnFileIndexed(cb) to register multiple subscribers. */
+  setOnFileIndexed(cb: (relativePath: string, content: string) => void): void {
+    this.onFileIndexedCbs.length = 0;
+    this.onFileIndexedCbs.push(cb);
+  }
+
+  /** @deprecated Use addOnFileRemoved(cb) to register multiple subscribers. */
   setOnFileRemoved(cb: (relativePath: string) => void): void {
-    this.onFileRemovedCb = cb;
+    this.onFileRemovedCbs.length = 0;
+    this.onFileRemovedCbs.push(cb);
+  }
+
+  getChangeCount(): number {
+    return this.meaningfulChangeCount;
+  }
+
+  resetChangeCount(): void {
+    this.meaningfulChangeCount = 0;
   }
 
   /** Number of files currently in the offline queue. */
@@ -117,13 +156,14 @@ export class VaultIndexer {
 
     await this.store.upsert({ docPath: relativePath, chunks: vectorChunks });
 
-    // Notify callback after successful indexing
-    this.onFileIndexedCb?.(relativePath, content);
+    this.notifyFileIndexed(relativePath, content);
+    this.recordMeaningfulChange(relativePath);
   }
 
   async removeFile(relativePath: string): Promise<void> {
     await this.store.delete(relativePath);
-    this.onFileRemovedCb?.(relativePath);
+    this.notifyFileRemoved(relativePath);
+    this.recordMeaningfulChange(relativePath);
   }
 
   // ── Bulk indexing ──────────────────────────────────────────────
@@ -260,5 +300,32 @@ export class VaultIndexer {
       lastFailure,
       indexedDocuments: await this.store.size(),
     };
+  }
+
+  private notifyFileIndexed(relativePath: string, content: string): void {
+    for (const callback of this.onFileIndexedCbs) {
+      callback(relativePath, content);
+    }
+  }
+
+  private notifyFileRemoved(relativePath: string): void {
+    for (const callback of this.onFileRemovedCbs) {
+      callback(relativePath);
+    }
+  }
+
+  private recordMeaningfulChange(relativePath: string): void {
+    if (relativePath.startsWith("meta/")) {
+      return;
+    }
+
+    this.meaningfulChangeCount++;
+
+    if (this.meaningfulChangeCount >= this.threshold) {
+      for (const callback of this.onThresholdReachedCbs) {
+        callback();
+      }
+      this.resetChangeCount();
+    }
   }
 }
