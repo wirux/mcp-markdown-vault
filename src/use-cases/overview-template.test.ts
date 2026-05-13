@@ -12,8 +12,23 @@ describe("generateOverviewStub", () => {
     expect(generateOverviewStub(ts)).toContain("generated_by: mcp-markdown-vault");
   });
 
-  it("includes managed_by: user in frontmatter", () => {
+  it("includes managed_by: user in frontmatter for manual mode (default)", () => {
     expect(generateOverviewStub(ts)).toContain("managed_by: user");
+    expect(generateOverviewStub(ts, "manual")).toContain("managed_by: user");
+  });
+
+  it("includes managed_by: auto in frontmatter for auto mode", () => {
+    expect(generateOverviewStub(ts, "auto")).toContain("managed_by: auto");
+  });
+
+  it("auto mode stub contains auto-generated notice", () => {
+    const result = generateOverviewStub(ts, "auto");
+    expect(result).toContain("auto-generated");
+  });
+
+  it("manual mode stub contains user-controlled notice", () => {
+    const result = generateOverviewStub(ts, "manual");
+    expect(result).toContain("user-controlled");
   });
 
   it("includes generated_at matching the timestamp param", () => {
@@ -22,12 +37,6 @@ describe("generateOverviewStub", () => {
 
   it("includes the main heading", () => {
     expect(generateOverviewStub(ts)).toContain("# Vault Overview");
-  });
-
-  it("includes an HTML comment indicating user-controlled nature", () => {
-    const result = generateOverviewStub(ts);
-    expect(result).toContain("<!--");
-    expect(result).toContain("user-controlled");
   });
 
   it("different timestamps produce different generated_at values", () => {

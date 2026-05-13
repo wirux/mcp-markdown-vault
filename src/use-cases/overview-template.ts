@@ -1,4 +1,18 @@
-export function generateOverviewStub(timestamp: string): string {
+export function generateOverviewStub(timestamp: string, mode: "auto" | "manual" = "manual"): string {
+  if (mode === "auto") {
+    return `---
+schema_version: 1
+generated_by: mcp-markdown-vault
+generated_at: ${timestamp}
+managed_by: auto
+---
+
+# Vault Overview
+
+<!-- This file is auto-generated. Manual edits will be overwritten on the next refresh. -->
+`;
+  }
+
   return `---
 schema_version: 1
 generated_by: mcp-markdown-vault
