@@ -24,7 +24,7 @@ async function makeTempVault() {
 describe("VaultAutoInitService", () => {
   it("creates both meta files in empty vault", async () => {
     const { adapter } = await makeTempVault();
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test vault" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.contractCreated).toBe(true);
     expect(result.overviewCreated).toBe(true);
@@ -36,7 +36,7 @@ describe("VaultAutoInitService", () => {
   it("emits warning when vault has existing .md files but no contract.md", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("notes/existing.md", "# Existing");
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.contractCreated).toBe(true);
     expect(result.warnings.length).toBeGreaterThan(0);
@@ -46,7 +46,7 @@ describe("VaultAutoInitService", () => {
   it("does not overwrite existing contract.md", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("meta/contract.md", "# My Custom Contract");
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.contractCreated).toBe(false);
     const content = await adapter.readNote("meta/contract.md");
@@ -56,7 +56,7 @@ describe("VaultAutoInitService", () => {
   it("does not overwrite existing overview.md", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("meta/overview.md", "# My Overview");
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.overviewCreated).toBe(false);
     const content = await adapter.readNote("meta/overview.md");
@@ -67,7 +67,7 @@ describe("VaultAutoInitService", () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("meta/contract.md", "contract");
     await adapter.writeNote("meta/overview.md", "overview");
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.contractCreated).toBe(false);
     expect(result.overviewCreated).toBe(false);
@@ -77,7 +77,7 @@ describe("VaultAutoInitService", () => {
   it("creates only overview when contract already exists", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("meta/contract.md", "contract");
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.contractCreated).toBe(false);
     expect(result.overviewCreated).toBe(true);
@@ -86,7 +86,7 @@ describe("VaultAutoInitService", () => {
   it("creates only contract when overview already exists", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("meta/overview.md", "overview");
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.contractCreated).toBe(true);
     expect(result.overviewCreated).toBe(false);
@@ -94,7 +94,7 @@ describe("VaultAutoInitService", () => {
 
   it("generated contract contains expected structure", async () => {
     const { adapter } = await makeTempVault();
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "my research notes" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     await service.initialize();
     const content = await adapter.readNote("meta/contract.md");
     expect(content).toContain("# Vault Contract");
@@ -104,7 +104,7 @@ describe("VaultAutoInitService", () => {
 
   it("generated overview contains managed_by: user in frontmatter", async () => {
     const { adapter } = await makeTempVault();
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     await service.initialize();
     const content = await adapter.readNote("meta/overview.md");
     expect(content).toContain("managed_by: user");
@@ -112,7 +112,7 @@ describe("VaultAutoInitService", () => {
 
   it("is idempotent — running twice does not throw or corrupt", async () => {
     const { adapter } = await makeTempVault();
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     await service.initialize();
     const result2 = await service.initialize();
     expect(result2.contractCreated).toBe(false);
@@ -130,7 +130,7 @@ describe("VaultAutoInitService", () => {
       deleteNote: adapter.deleteNote.bind(adapter),
       stat: adapter.stat.bind(adapter),
     };
-    const service = new VaultAutoInitService({ fsAdapter: brokenAdapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: brokenAdapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.contractCreated).toBe(false);
     expect(result.overviewCreated).toBe(false);
@@ -138,7 +138,7 @@ describe("VaultAutoInitService", () => {
 
   it("no warning emitted when vault is empty (only meta files after init)", async () => {
     const { adapter } = await makeTempVault();
-    const service = new VaultAutoInitService({ fsAdapter: adapter, vaultContext: "test" });
+    const service = new VaultAutoInitService({ fsAdapter: adapter, mode: "manual" });
     const result = await service.initialize();
     expect(result.warnings).toEqual([]);
   });

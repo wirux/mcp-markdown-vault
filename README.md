@@ -195,7 +195,7 @@ The server selects an embedding provider automatically:
 | Variable | Default | Description |
 |---|---|---|
 | `VAULT_PATH` | `/vault` | Markdown vault directory |
-| `VAULT_CONTEXT` | `general markdown notes vault` | One-line description of vault scope; surfaced to connected agents via MCP instructions and tool descriptions |
+| `VAULT_CONTEXT_MODE` | `auto` | Vault orientation mode: `auto` (server generates `meta/overview.md` from structural heuristics) or `manual` (you author `meta/overview.md` yourself) |
 | `MCP_TRANSPORT_TYPE` | `stdio` | `stdio` (single client) or `sse` (multi-client HTTP) |
 | `PORT` | `3000` | HTTP port (SSE mode only) |
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings |
@@ -230,7 +230,9 @@ When an MCP client connects, the server automatically provides vault context so 
 
 ### Making agents find your vault
 
-The single most important thing: **set `VAULT_CONTEXT` to describe what your vault contains.**
+In `auto` mode (the default), the server generates `meta/overview.md` automatically after startup using structural heuristics: top directories, file counts, tag frequency, and H1 headings from top files. No configuration needed.
+
+In `manual` mode, you author `meta/overview.md` yourself. Set `VAULT_CONTEXT_MODE=manual` and write whatever helps an agent understand your vault:
 
 ```json
 {
@@ -239,17 +241,14 @@ The single most important thing: **set `VAULT_CONTEXT` to describe what your vau
       "command": "npx",
       "args": ["-y", "@wirux/mcp-markdown-vault"],
       "env": {
-        "VAULT_PATH": "/path/to/your/vault",
-        "VAULT_CONTEXT": "personal research notes on machine learning and distributed systems"
+        "VAULT_PATH": "/path/to/your/vault"
       }
     }
   }
 }
 ```
 
-This one-line description is injected into the MCP handshake, the `view` tool description, and resource headers. When a user asks the agent something related to "machine learning" or "distributed systems", the agent sees the scope match and queries the vault autonomously.
-
-Default: `general markdown notes vault` (too generic for reliable routing — always set a specific value).
+In both modes, `meta/overview.md` is the canonical source of vault description for connected agents.
 
 ### How context is delivered
 
@@ -260,13 +259,13 @@ The server uses four complementary mechanisms so behavior degrades gracefully ac
 | **`instructions` field** | MCP handshake (session start) | Vault scope + tool dispatcher summary. Supported by Claude Desktop, Claude Code, Cursor. |
 | **MCP Resources** | On-demand via `ReadResource` | `vault://overview` (composed view with live stats + contract + overview), `vault://contract` (raw contract), `vault://stats` (live JSON) |
 | **First-call priming** | First `view` tool call per session | `_meta.vault_orientation` block with scope + hint to read `vault://overview` |
-| **`view` tool description** | Tool listing | Includes the `VAULT_CONTEXT` scope string for tool-selection matching |
+| **`view` tool description** | Tool listing | Includes the vault scope string from `meta/overview.md` for tool-selection matching |
 
 Even if a client supports none of these (rare), the agent still discovers vault content through normal tool use.
 
 ### Two files: contract vs overview
 
-On first startup, the server creates two files in `<VAULT_PATH>/meta/`. Both are created once and **never overwritten** — they are fully yours to edit.
+On first startup, the server creates two files in `<VAULT_PATH>/meta/`. In `manual` mode, both are created once and **never overwritten** — they are fully yours to edit. In `auto` mode, `meta/overview.md` is regenerated automatically after indexing completes and after every 5 meaningful file changes; `meta/contract.md` is still created once and never overwritten.
 
 #### `meta/contract.md` — Tool optimization (power users)
 
@@ -280,23 +279,25 @@ Tells agents **how** to use the vault's tools efficiently. Pre-filled with sensi
 | `## Naming Conventions` | File naming patterns | `vault.create` |
 | `## Note Template` | Default structure for new notes | `vault.create`, `vault.create_from_template` |
 
-Most users don't need to edit this. Power users can customize it to match their vault's specific conventions — agents read it via `vault://overview` and `vault://contract` resources on each request.
+Most users don't need to edit this. Power users can customize it to match their vault's specific conventions — agents read it via `vault://contract` resource on each request.
 
 > **Tip:** Add a `## Scope` section for a richer, multi-line vault description. Agents see it when reading `vault://overview` or `vault://contract` resources.
 
-#### `meta/overview.md` — Vault narrative (all users)
+#### `meta/overview.md` — Vault description (read-side)
 
-Free-form description of **what** the vault currently contains. Created as an empty stub. Write here whatever helps an agent understand your vault's content: active projects, key topic areas, organizational philosophy.
+In `auto` mode: auto-generated after startup and refreshed after every 5 meaningful file changes. Contains top directories, file counts, tag frequency, and H1 headings from top files.
 
-If the body is non-empty, its content is appended to the `vault://overview` resource that agents can read on demand.
+In `manual` mode: created as an empty stub. Write here whatever helps an agent understand your vault's content: active projects, key topic areas, organizational philosophy.
+
+Its content is the primary source for the `vault://overview` resource that agents read on demand.
 
 ### Hot reload behavior
 
 | What changed | Effect | Restart needed? |
 |---|---|---|
-| `meta/contract.md` | Reflected in `vault://overview` and `vault://contract` on next read | No |
+| `meta/contract.md` | Reflected in `vault://contract` on next read | No |
 | `meta/overview.md` | Reflected in `vault://overview` on next read | No |
-| `VAULT_CONTEXT` env var | Reflected in `instructions` field and `view` tool description | Yes |
+| `VAULT_CONTEXT_MODE` env var | Changes auto vs manual behavior | Yes |
 
 ### Migration notes
 

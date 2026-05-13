@@ -14,7 +14,7 @@ Tool dispatchers (action-based — pass \`action\` parameter to each):
 - workflow: Petri-net state machine (status, transition, history, reset)
 - system: server status (status, reindex)
 
-For full vault conventions (directory layout, frontmatter schema, tag conventions, search hints), read the \`vault://overview\` resource if your client supports MCP resources, or check \`meta/contract.md\` directly via \`view\` action=\`read\`.
+For full vault conventions (directory layout, frontmatter schema, tag conventions, search hints), read the \`vault://overview\` resource if your client supports MCP resources, or check \`meta/overview.md\` and \`meta/contract.md\` directly via \`view\` action=\`read\`.
 
 Search guidance: use \`semantic_search\` for conceptual or fuzzy queries, \`global_search\` for exact phrases, \`outline\` for structure exploration before search.`;
 

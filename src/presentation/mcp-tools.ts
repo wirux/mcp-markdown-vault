@@ -26,7 +26,7 @@ import { VaultIndexer } from "../use-cases/vault-indexer.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
-import { DomainError, InvalidArgumentError, NoteNotFoundError } from "../domain/errors/index.js";
+import { DomainError, InvalidArgumentError } from "../domain/errors/index.js";
 import { VaultStatsComposer } from "../use-cases/vault-stats.js";
 import { VaultOverviewResourceComposer } from "../use-cases/vault-resource-overview.js";
 
@@ -39,7 +39,7 @@ export interface McpDependencies {
   backlinkIndex?: BacklinkIndexService | undefined;
   indexer?: VaultIndexer | undefined;
   instructions?: string | undefined;
-  vaultScope?: string | undefined;
+  getVaultScope?: (() => string) | undefined;
 }
 
 /**
@@ -69,33 +69,15 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   const overviewComposer = new VaultOverviewResourceComposer({
     fsAdapter: deps.fsAdapter,
     statsComposer,
-    vaultScope: deps.vaultScope ?? "general markdown notes vault",
   });
 
   server.registerResource(
     "vault-overview",
     "vault://overview",
-    { title: "Vault Overview", description: "Vault scope, live stats, navigation contract, and overview.", mimeType: "text/markdown" },
+    { title: "Vault Overview", description: "Complete vault context: live stats, overview, and conventions (frontmatter schema, tags, naming).", mimeType: "text/markdown" },
     async () => {
       const text = await overviewComposer.compose();
       return { contents: [{ uri: "vault://overview", text, mimeType: "text/markdown" }] };
-    },
-  );
-
-  server.registerResource(
-    "vault-contract",
-    "vault://contract",
-    { title: "Vault Contract", description: "Raw vault navigation contract (meta/contract.md).", mimeType: "text/markdown" },
-    async () => {
-      try {
-        const text = await deps.fsAdapter.readNote("meta/contract.md");
-        return { contents: [{ uri: "vault://contract", text, mimeType: "text/markdown" }] };
-      } catch (err) {
-        if (err instanceof NoteNotFoundError) {
-          return { contents: [{ uri: "vault://contract", text: "meta/contract.md not found.", mimeType: "text/markdown" }] };
-        }
-        throw err;
-      }
     },
   );
 
@@ -361,7 +343,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      `Read and search markdown notes. Vault scope: ${deps.vaultScope ?? "general markdown notes vault"}.\nActions: search (heading-aware fragment retrieval with TF-IDF + proximity), semantic_search (vector + lexical hybrid for conceptual queries), global_search (cross-vault exact-match grep), outline (file or directory structure tree), read (full file or single section by heading), frontmatter_get (parse YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).`,
+      `Read and search markdown notes. Vault scope: ${(deps.getVaultScope ?? (() => "general markdown notes vault"))()}.\nActions: search (heading-aware fragment retrieval with TF-IDF + proximity), semantic_search (vector + lexical hybrid for conceptual queries), global_search (cross-vault exact-match grep), outline (file or directory structure tree), read (full file or single section by heading), frontmatter_get (parse YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).`,
     inputSchema: {
       action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read", "backlinks"]),
       path: z.string().optional(),
@@ -481,8 +463,8 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         return Object.assign({}, actionResult as object, {
           _meta: {
             vault_orientation: {
-              scope: deps.vaultScope ?? "general markdown notes vault",
-              hint: "Read vault://overview resource or meta/contract.md for full conventions.",
+              scope: (deps.getVaultScope ?? (() => "general markdown notes vault"))(),
+              hint: "Read vault://overview resource for full vault context and conventions.",
             },
           },
         });

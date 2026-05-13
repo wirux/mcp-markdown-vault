@@ -25,28 +25,30 @@ import {
   parseTransportType,
   startTransport,
 } from "./presentation/transport.js";
+import {
+  parseVaultContextConfig,
+  logDeprecationWarning,
+  type VaultContextMode,
+} from "./use-cases/vault-context-config.js";
+import { OverviewManager } from "./use-cases/overview-manager.js";
 
-export const DEFAULT_VAULT_CONTEXT = "general markdown notes vault";
-
-export function readVaultContext(env: NodeJS.ProcessEnv = process.env): string {
-  return env["VAULT_CONTEXT"] || DEFAULT_VAULT_CONTEXT;
-}
+export const DEFAULT_VAULT_SCOPE = "general markdown notes vault";
 
 export interface VaultOrientation {
   initResult: AutoInitResult;
-  vaultScope: string;
+  getVaultScope: () => string;
   instructions: string;
 }
 
 export async function initializeVaultOrientation(deps: {
   fsAdapter: IFileSystemAdapter;
-  vaultContext: string;
+  mode: VaultContextMode;
   logger?: Pick<Console, "error">;
 }): Promise<VaultOrientation> {
   const logger = deps.logger ?? console;
   const autoInit = new VaultAutoInitService({
     fsAdapter: deps.fsAdapter,
-    vaultContext: deps.vaultContext,
+    mode: deps.mode,
   });
   const initResult = await autoInit.initialize().catch((err: unknown) => {
     logger.error("Vault auto-init failed:", err);
@@ -67,13 +69,32 @@ export async function initializeVaultOrientation(deps: {
     logger.error(`[warn] ${warning}`);
   }
 
-  const vaultScope = deps.vaultContext.trim() || DEFAULT_VAULT_CONTEXT;
+  const getVaultScope = makeVaultScopeProvider(deps.fsAdapter);
 
   return {
     initResult,
-    vaultScope,
-    instructions: composeInstructions(vaultScope),
+    getVaultScope,
+    instructions: composeInstructions(DEFAULT_VAULT_SCOPE),
   };
+}
+
+export function makeVaultScopeProvider(
+  fsAdapter: IFileSystemAdapter,
+): () => string {
+  let cached: string = DEFAULT_VAULT_SCOPE;
+
+  const refresh = (): void => {
+    fsAdapter.readNote("meta/overview.md").then((content) => {
+      const firstMeaningfulLine = content
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.length > 0 && !l.startsWith("---") && !l.startsWith("#") && !l.startsWith("schema_version") && !l.startsWith("generated") && !l.startsWith("managed_by"));
+      cached = firstMeaningfulLine ?? DEFAULT_VAULT_SCOPE;
+    }).catch(() => { cached = DEFAULT_VAULT_SCOPE; });
+  };
+
+  refresh();
+  return () => cached;
 }
 
 export function createServerFactory(
@@ -133,7 +154,8 @@ async function createEmbeddingProvider(): Promise<IEmbeddingProvider> {
 
 async function main(): Promise<void> {
   const vaultRoot = process.env["VAULT_PATH"] ?? "/vault";
-  const vaultContext = readVaultContext();
+  const config = parseVaultContextConfig(process.env);
+  logDeprecationWarning(config);
   const transportType = parseTransportType(
     process.env["MCP_TRANSPORT_TYPE"],
   );
@@ -148,14 +170,12 @@ async function main(): Promise<void> {
     process.env["VECTOR_STORE_COLLECTION"] ?? "markdown_vault";
   const allowReset = process.env["VECTOR_STORE_RESET"] === "true";
 
-  // Shared dependencies (reused across all client connections)
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
-  const { vaultScope, instructions } = await initializeVaultOrientation({
+  const { getVaultScope, instructions } = await initializeVaultOrientation({
     fsAdapter,
-    vaultContext,
+    mode: config.mode,
   });
 
-  // ── Startup health checks ──────────────────────────────────────
   if (ollamaUrl !== undefined) {
     await validateOllama(ollamaUrl, ollamaModel);
   }
@@ -177,10 +197,8 @@ async function main(): Promise<void> {
     embedder.dimensions,
   );
 
-  // Backlink index — shared across connections
   const backlinkIndex = new BacklinkIndexService(new MarkdownPipeline());
 
-  // Start background indexing (shared across all connections)
   const fileWatcher = new ChokidarFileWatcher();
   const indexer = new VaultIndexer(
     vaultRoot,
@@ -190,16 +208,24 @@ async function main(): Promise<void> {
     fsAdapter,
   );
 
-  // Wire watcher callbacks to backlink index
-  indexer.setOnFileIndexed((relPath, content) => {
+  indexer.addOnFileIndexed((relPath, content) => {
     backlinkIndex.updateFile(relPath, content);
   });
-  indexer.setOnFileRemoved((relPath) => {
+  indexer.addOnFileRemoved((relPath) => {
     backlinkIndex.removeFile(relPath);
   });
 
-  // Server factory: each connection gets its own McpServer + WorkflowStateMachine.
-  // Shared deps (fs, vectors, embedder, backlinkIndex, indexer) are captured by closure.
+  let overviewManager: OverviewManager | undefined;
+  if (config.mode === "auto") {
+    overviewManager = new OverviewManager({ fsAdapter });
+    indexer.addOnThresholdReached(() => {
+      overviewManager!.writeOverview().catch((err: unknown) =>
+        console.error("Overview refresh failed:", err),
+      );
+      indexer.resetChangeCount();
+    });
+  }
+
   const serverFactory = createServerFactory({
     fsAdapter,
     vectorStore,
@@ -208,14 +234,12 @@ async function main(): Promise<void> {
     backlinkIndex,
     indexer,
     instructions,
-    vaultScope,
+    getVaultScope,
   });
 
-  // Vector indexing + backlinks on startup
   indexer
     .indexAll()
     .then(async () => {
-      // Build backlink index after vault indexing completes
       const allFiles = await fsAdapter.listNotes();
       const entries = await Promise.all(
         allFiles.map(async (p) => ({
@@ -225,6 +249,11 @@ async function main(): Promise<void> {
       );
       backlinkIndex.rebuildIndex(entries);
       console.error(`Backlink index built: ${allFiles.length} files`);
+      if (overviewManager !== undefined) {
+        await overviewManager.writeOverview().catch((err: unknown) =>
+          console.error("Initial overview generation failed:", err),
+        );
+      }
     })
     .catch((err: unknown) =>
       console.error("Initial indexing failed:", err),
@@ -235,7 +264,6 @@ async function main(): Promise<void> {
       console.error("Watcher failed to start:", err),
     );
 
-  // Connect via selected transport
   console.error(`Transport: ${transportType}`);
   if (authToken) {
     console.error("Bearer auth: enabled");

@@ -89,7 +89,7 @@ beforeEach(async () => {
     vaultRoot: tmpDir,
     backlinkIndex,
     instructions: "test instructions",
-    vaultScope: "test vault",
+    getVaultScope: () => "test vault",
   };
 
   const server = createMcpServer(deps);
@@ -140,10 +140,10 @@ describe("MCP Server — tool listing", () => {
 });
 
 describe("MCP Server — resources and priming", () => {
-  it("listResources returns 3 resources with expected URIs", async () => {
+  it("listResources returns 2 resources with expected URIs", async () => {
     const result = await client.listResources();
     const uris = result.resources.map((resource) => resource.uri).sort();
-    expect(uris).toEqual(["vault://contract", "vault://overview", "vault://stats"]);
+    expect(uris).toEqual(["vault://overview", "vault://stats"]);
   });
 
   it("readResource overview returns markdown starting with vault heading", async () => {
@@ -156,20 +156,21 @@ describe("MCP Server — resources and priming", () => {
     const result = await client.readResource({ uri: "vault://overview" });
     const content = result.contents[0];
     expect(content).toBeDefined();
-    expect(getTextResourceContent(content).text.startsWith("# Vault:")).toBe(true);
+    expect(getTextResourceContent(content).text.startsWith("# Vault Overview")).toBe(true);
   });
 
-  it("readResource contract returns contract.md content", async () => {
+  it("readResource overview includes contract.md content when present", async () => {
     await fs.mkdir(path.join(tmpDir, "meta"), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, "meta/contract.md"),
       "# Contract\n\nVault contract content.\n",
     );
 
-    const result = await client.readResource({ uri: "vault://contract" });
+    const result = await client.readResource({ uri: "vault://overview" });
     const content = result.contents[0];
     expect(content).toBeDefined();
-    expect(getTextResourceContent(content).text).toBe("# Contract\n\nVault contract content.\n");
+    const text = getTextResourceContent(content).text;
+    expect(text).toContain("Vault contract content.");
   });
 
   it("readResource stats returns valid JSON with expected fields", async () => {
@@ -196,7 +197,7 @@ describe("MCP Server — resources and priming", () => {
 
     expect(parsed.result._meta.vault_orientation).toEqual({
       scope: "test vault",
-      hint: "Read vault://overview resource or meta/contract.md for full conventions.",
+      hint: "Read vault://overview resource for full vault context and conventions.",
     });
   });
 

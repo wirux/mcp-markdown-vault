@@ -1,7 +1,6 @@
 import type { IFileSystemAdapter } from "../domain/interfaces/file-system-adapter.js";
 import { NoteNotFoundError } from "../domain/errors/index.js";
 import type { VaultStatsComposer } from "./vault-stats.js";
-import { sanitizeForMarkdown } from "./markdown-utils.js";
 
 function stripFrontmatterAndComments(content: string): string {
   let body = content;
@@ -37,33 +36,32 @@ function formatStats(stats: Awaited<ReturnType<VaultStatsComposer["computeStats"
 export class VaultOverviewResourceComposer {
   private readonly fsAdapter: IFileSystemAdapter;
   private readonly statsComposer: VaultStatsComposer;
-  private readonly vaultScope: string;
 
   constructor(deps: {
     fsAdapter: IFileSystemAdapter;
     statsComposer: VaultStatsComposer;
-    vaultScope: string;
   }) {
     this.fsAdapter = deps.fsAdapter;
     this.statsComposer = deps.statsComposer;
-    this.vaultScope = deps.vaultScope;
   }
 
   async compose(): Promise<string> {
-    const safeScope = sanitizeForMarkdown(this.vaultScope);
-    const sections: string[] = [`# Vault: ${safeScope}`];
+    const sections: string[] = [`# Vault Overview`];
 
     const stats = await this.statsComposer.computeStats();
     sections.push(formatStats(stats));
 
-    const contractContent = await this.readFileSafe("meta/contract.md");
-    if (contractContent !== null) {
-      sections.push(contractContent);
-    }
-
     const overviewContent = await this.readFileSafe("meta/overview.md");
     if (overviewContent !== null) {
       const body = stripFrontmatterAndComments(overviewContent);
+      if (body) {
+        sections.push(body);
+      }
+    }
+
+    const contractContent = await this.readFileSafe("meta/contract.md");
+    if (contractContent !== null) {
+      const body = stripFrontmatterAndComments(contractContent);
       if (body) {
         sections.push(body);
       }

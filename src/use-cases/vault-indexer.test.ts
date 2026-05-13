@@ -141,7 +141,7 @@ describe("VaultIndexer", () => {
   describe("onFileIndexed callback", () => {
     it("invokes callback after successfully indexing a file", async () => {
       const calls: Array<{ path: string; content: string }> = [];
-      indexer.setOnFileIndexed((relPath, content) => {
+      indexer.addOnFileIndexed((relPath, content) => {
         calls.push({ path: relPath, content });
       });
 
@@ -158,7 +158,7 @@ describe("VaultIndexer", () => {
 
     it("invokes onFileRemoved callback after removing a file", async () => {
       const removedPaths: string[] = [];
-      indexer.setOnFileRemoved((relPath) => {
+      indexer.addOnFileRemoved((relPath) => {
         removedPaths.push(relPath);
       });
 
@@ -170,6 +170,142 @@ describe("VaultIndexer", () => {
       await indexer.removeFile("rm.md");
 
       expect(removedPaths).toEqual(["rm.md"]);
+    });
+
+    it("fans out indexed and removed events to multiple subscribers", async () => {
+      const indexedCallsA: Array<{ path: string; content: string }> = [];
+      const indexedCallsB: Array<{ path: string; content: string }> = [];
+      const removedCallsA: string[] = [];
+      const removedCallsB: string[] = [];
+
+      indexer.addOnFileIndexed((relPath, content) => {
+        indexedCallsA.push({ path: relPath, content });
+      });
+      indexer.addOnFileIndexed((relPath, content) => {
+        indexedCallsB.push({ path: relPath, content });
+      });
+      indexer.addOnFileRemoved((relPath) => {
+        removedCallsA.push(relPath);
+      });
+      indexer.addOnFileRemoved((relPath) => {
+        removedCallsB.push(relPath);
+      });
+
+      await fs.writeFile(
+        path.join(tmpDir, "fanout.md"),
+        "# Fanout\n\nShared content.\n",
+      );
+
+      await indexer.indexFile("fanout.md");
+      await indexer.removeFile("fanout.md");
+
+      expect(indexedCallsA).toHaveLength(1);
+      expect(indexedCallsB).toHaveLength(1);
+      expect(indexedCallsA[0]).toEqual(indexedCallsB[0]);
+      expect(indexedCallsA[0]!.path).toBe("fanout.md");
+      expect(indexedCallsA[0]!.content).toContain("Shared content.");
+      expect(removedCallsA).toEqual(["fanout.md"]);
+      expect(removedCallsB).toEqual(["fanout.md"]);
+    });
+
+    it("deprecated setters replace existing subscribers with a single callback", async () => {
+      const indexedCalls: string[] = [];
+      const removedCalls: string[] = [];
+      const setOnFileIndexed = (Reflect.get(indexer, "setOnFileIndexed") as (
+        cb: (relativePath: string, content: string) => void,
+      ) => void).bind(indexer);
+      const setOnFileRemoved = (Reflect.get(indexer, "setOnFileRemoved") as (
+        cb: (relativePath: string) => void,
+      ) => void).bind(indexer);
+
+      indexer.addOnFileIndexed((relPath) => {
+        indexedCalls.push(`old:${relPath}`);
+      });
+      setOnFileIndexed((relPath) => {
+        indexedCalls.push(`new:${relPath}`);
+      });
+
+      indexer.addOnFileRemoved((relPath) => {
+        removedCalls.push(`old:${relPath}`);
+      });
+      setOnFileRemoved((relPath) => {
+        removedCalls.push(`new:${relPath}`);
+      });
+
+      await fs.writeFile(
+        path.join(tmpDir, "replace-subscriber.md"),
+        "# Replace\n\nCallback.\n",
+      );
+
+      await indexer.indexFile("replace-subscriber.md");
+      await indexer.removeFile("replace-subscriber.md");
+
+      expect(indexedCalls).toEqual(["new:replace-subscriber.md"]);
+      expect(removedCalls).toEqual(["new:replace-subscriber.md"]);
+    });
+  });
+
+  describe("change counter", () => {
+    it("fires threshold callback exactly on the fifth meaningful change and resets the counter", async () => {
+      const thresholdCalls: number[] = [];
+
+      indexer.addOnThresholdReached(() => {
+        thresholdCalls.push(indexer.getChangeCount());
+      });
+
+      for (const fileName of ["one.md", "two.md", "three.md", "four.md", "five.md"]) {
+        await fs.writeFile(
+          path.join(tmpDir, fileName),
+          `# ${fileName}\n\nContent.\n`,
+        );
+        await indexer.indexFile(fileName);
+      }
+
+      expect(thresholdCalls).toEqual([5]);
+      expect(indexer.getChangeCount()).toBe(0);
+    });
+
+    it("does not count meta paths toward the threshold", async () => {
+      const thresholdCalls: number[] = [];
+
+      await fs.mkdir(path.join(tmpDir, "meta"), { recursive: true });
+      indexer.addOnThresholdReached(() => {
+        thresholdCalls.push(indexer.getChangeCount());
+      });
+
+      for (const fileName of [
+        "meta/overview.md",
+        "note-a.md",
+        "meta/contract.md",
+        "note-b.md",
+        "note-c.md",
+        "note-d.md",
+      ]) {
+        await fs.writeFile(
+          path.join(tmpDir, fileName),
+          `# ${fileName}\n\nContent.\n`,
+        );
+        await indexer.indexFile(fileName);
+      }
+
+      expect(thresholdCalls).toEqual([]);
+      expect(indexer.getChangeCount()).toBe(4);
+    });
+
+    it("resetChangeCount clears accumulated meaningful changes", async () => {
+      for (const fileName of ["reset-a.md", "reset-b.md"]) {
+        await fs.writeFile(
+          path.join(tmpDir, fileName),
+          `# ${fileName}\n\nContent.\n`,
+        );
+        await indexer.indexFile(fileName);
+      }
+
+      expect(indexer.getChangeCount()).toBe(2);
+
+      indexer.resetChangeCount();
+
+      expect(indexer.getChangeCount()).toBe(0);
     });
   });
 

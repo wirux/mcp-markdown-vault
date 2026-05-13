@@ -8,10 +8,10 @@ import { LocalFileSystemAdapter } from "./infrastructure/local-fs-adapter.js";
 import { InMemoryVectorStore } from "./infrastructure/vector-store/in-memory-vector-store.js";
 import { createMcpServer } from "./presentation/mcp-tools.js";
 import {
-  DEFAULT_VAULT_CONTEXT,
+  DEFAULT_VAULT_SCOPE,
   createServerFactory,
   initializeVaultOrientation,
-  readVaultContext,
+  makeVaultScopeProvider,
 } from "./index.js";
 import type {
   IEmbeddingProvider,
@@ -60,19 +60,8 @@ class ThrowingVectorStore implements IVectorStore {
 }
 
 const tmpDirs: string[] = [];
-const originalVaultContext = process.env["VAULT_CONTEXT"];
-
-beforeEach(() => {
-  delete process.env["VAULT_CONTEXT"];
-});
 
 afterEach(async () => {
-  if (originalVaultContext === undefined) {
-    delete process.env["VAULT_CONTEXT"];
-  } else {
-    process.env["VAULT_CONTEXT"] = originalVaultContext;
-  }
-
   for (const dir of tmpDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -101,27 +90,12 @@ async function readInitializeInstructions(server: ReturnType<typeof createMcpSer
 }
 
 describe("src/index composition root helpers", () => {
-  it("uses default vault context when VAULT_CONTEXT is unset", () => {
-    delete process.env["VAULT_CONTEXT"];
-    expect(readVaultContext()).toBe(DEFAULT_VAULT_CONTEXT);
-  });
-
-  it("uses default vault context when VAULT_CONTEXT is empty string", () => {
-    process.env["VAULT_CONTEXT"] = "";
-    expect(readVaultContext()).toBe(DEFAULT_VAULT_CONTEXT);
-  });
-
-  it("uses provided VAULT_CONTEXT when set", () => {
-    process.env["VAULT_CONTEXT"] = "my research vault";
-    expect(readVaultContext()).toBe("my research vault");
-  });
-
   it("auto-init on empty vault creates both meta files", async () => {
     const { fsAdapter } = await makeTempVault();
 
     const result = await initializeVaultOrientation({
       fsAdapter,
-      vaultContext: readVaultContext({ VAULT_CONTEXT: "my research vault" }),
+      mode: "manual",
       logger: { error: () => undefined },
     });
 
@@ -138,7 +112,7 @@ describe("src/index composition root helpers", () => {
 
     const result = await initializeVaultOrientation({
       fsAdapter,
-      vaultContext: "my research vault",
+      mode: "manual",
       logger: { error: () => undefined },
     });
 
@@ -164,7 +138,7 @@ describe("src/index composition root helpers", () => {
 
     const result = await initializeVaultOrientation({
       fsAdapter: brokenFsAdapter,
-      vaultContext: "my research vault",
+      mode: "manual",
       logger: {
         error: (...args: unknown[]) => {
           errors.push(args);
@@ -173,7 +147,7 @@ describe("src/index composition root helpers", () => {
     });
 
     expect(result.instructions.length).toBeGreaterThan(0);
-    expect(result.vaultScope).toBe("my research vault");
+    expect(typeof result.getVaultScope()).toBe("string");
     expect(errors).toEqual([]);
   });
 
@@ -181,7 +155,7 @@ describe("src/index composition root helpers", () => {
     const { fsAdapter, vaultPath } = await makeTempVault();
     const orientation = await initializeVaultOrientation({
       fsAdapter,
-      vaultContext: "my research vault",
+      mode: "manual",
       logger: { error: () => undefined },
     });
     const serverFactory = createServerFactory({
@@ -190,7 +164,7 @@ describe("src/index composition root helpers", () => {
       embedder: new FakeEmbedder(),
       vaultRoot: vaultPath,
       instructions: orientation.instructions,
-      vaultScope: orientation.vaultScope,
+      getVaultScope: orientation.getVaultScope,
     });
 
     const instructions = await readInitializeInstructions(serverFactory());
@@ -199,41 +173,18 @@ describe("src/index composition root helpers", () => {
     expect(instructions).toBe(orientation.instructions);
   });
 
-  it("vaultScope uses vaultContext directly without file I/O", async () => {
+  it("getVaultScope returns default when overview.md does not exist", async () => {
     const { fsAdapter } = await makeTempVault();
-    const orientation = await initializeVaultOrientation({
-      fsAdapter,
-      vaultContext: "my research vault",
-      logger: { error: () => undefined },
-    });
-    expect(orientation.vaultScope).toBe("my research vault");
-  });
-
-  it("vaultScope falls back to default when vaultContext is empty", async () => {
-    const { fsAdapter } = await makeTempVault();
-    const orientation = await initializeVaultOrientation({
-      fsAdapter,
-      vaultContext: "",
-      logger: { error: () => undefined },
-    });
-    expect(orientation.vaultScope).toBe(DEFAULT_VAULT_CONTEXT);
-  });
-
-  it("vaultScope falls back to default when vaultContext is whitespace", async () => {
-    const { fsAdapter } = await makeTempVault();
-    const orientation = await initializeVaultOrientation({
-      fsAdapter,
-      vaultContext: "   ",
-      logger: { error: () => undefined },
-    });
-    expect(orientation.vaultScope).toBe(DEFAULT_VAULT_CONTEXT);
+    const getVaultScope = makeVaultScopeProvider(fsAdapter);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(getVaultScope()).toBe(DEFAULT_VAULT_SCOPE);
   });
 
   it("createServerFactory injects workflow per server instance while preserving orientation data", async () => {
     const { fsAdapter, vaultPath } = await makeTempVault();
     const orientation = await initializeVaultOrientation({
       fsAdapter,
-      vaultContext: "factory vault",
+      mode: "manual",
       logger: { error: () => undefined },
     });
     const vectorStore = new ThrowingVectorStore();
@@ -243,12 +194,47 @@ describe("src/index composition root helpers", () => {
       embedder: new FakeEmbedder(),
       vaultRoot: vaultPath,
       instructions: orientation.instructions,
-      vaultScope: orientation.vaultScope,
+      getVaultScope: orientation.getVaultScope,
     });
 
     const serverA = serverFactory();
     const serverB = serverFactory();
 
     expect(serverA).not.toBe(serverB);
+  });
+});
+
+describe("parseVaultContextConfig integration", () => {
+  beforeEach(() => {
+    delete process.env["VAULT_CONTEXT"];
+    delete process.env["VAULT_CONTEXT_MODE"];
+  });
+
+  afterEach(() => {
+    delete process.env["VAULT_CONTEXT"];
+    delete process.env["VAULT_CONTEXT_MODE"];
+  });
+
+  it("defaults to auto mode when VAULT_CONTEXT_MODE is unset", async () => {
+    const { parseVaultContextConfig } = await import("./use-cases/vault-context-config.js");
+    const config = parseVaultContextConfig({});
+    expect(config.mode).toBe("auto");
+  });
+
+  it("accepts manual mode", async () => {
+    const { parseVaultContextConfig } = await import("./use-cases/vault-context-config.js");
+    const config = parseVaultContextConfig({ VAULT_CONTEXT_MODE: "manual" });
+    expect(config.mode).toBe("manual");
+  });
+
+  it("throws InvalidConfigError for invalid mode", async () => {
+    const { parseVaultContextConfig } = await import("./use-cases/vault-context-config.js");
+    expect(() => parseVaultContextConfig({ VAULT_CONTEXT_MODE: "bogus" })).toThrow();
+  });
+
+  it("detects deprecated VAULT_CONTEXT", async () => {
+    const { parseVaultContextConfig } = await import("./use-cases/vault-context-config.js");
+    const config = parseVaultContextConfig({ VAULT_CONTEXT: "old value" });
+    expect(config.deprecatedVaultContext).toBe("old value");
   });
 });

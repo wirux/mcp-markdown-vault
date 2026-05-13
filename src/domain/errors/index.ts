@@ -173,3 +173,12 @@ export class InvalidArgumentError extends DomainError {
     this.name = "InvalidArgumentError";
   }
 }
+
+// ── Config errors ─────────────────────────────────────────────────
+
+export class InvalidConfigError extends DomainError {
+  constructor(detail: string) {
+    super("INVALID_CONFIG", `Invalid configuration: ${detail}`);
+    this.name = "InvalidConfigError";
+  }
+}
