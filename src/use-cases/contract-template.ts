@@ -1,7 +1,4 @@
-export function generateContractTemplate(
-  _vaultContext: string,
-  timestamp: string,
-): string {
+export function generateContractTemplate(timestamp: string): string {
   return `---
 schema_version: 1
 generated_by: mcp-markdown-vault

@@ -2,6 +2,7 @@ import type { IFileSystemAdapter } from "../domain/interfaces/file-system-adapte
 import { NoteAlreadyExistsError } from "../domain/errors/index.js";
 import { generateContractTemplate } from "./contract-template.js";
 import { generateOverviewStub } from "./overview-template.js";
+import type { VaultContextMode } from "./vault-context-config.js";
 
 export interface AutoInitResult {
   contractCreated: boolean;
@@ -11,11 +12,11 @@ export interface AutoInitResult {
 
 export class VaultAutoInitService {
   private readonly fsAdapter: IFileSystemAdapter;
-  private readonly vaultContext: string;
+  private readonly mode: VaultContextMode;
 
-  constructor(deps: { fsAdapter: IFileSystemAdapter; vaultContext: string }) {
+  constructor(deps: { fsAdapter: IFileSystemAdapter; mode: VaultContextMode }) {
     this.fsAdapter = deps.fsAdapter;
-    this.vaultContext = deps.vaultContext;
+    this.mode = deps.mode;
   }
 
   async initialize(): Promise<AutoInitResult> {
@@ -23,9 +24,8 @@ export class VaultAutoInitService {
     let contractCreated = false;
     let overviewCreated = false;
 
-    contractCreated = await this.createIfMissing(
-      "meta/contract.md",
-      () => generateContractTemplate(this.vaultContext, new Date().toISOString()),
+    contractCreated = await this.createIfMissing("meta/contract.md", () =>
+      generateContractTemplate(new Date().toISOString()),
     );
 
     if (contractCreated) {
@@ -38,9 +38,8 @@ export class VaultAutoInitService {
       }
     }
 
-    overviewCreated = await this.createIfMissing(
-      "meta/overview.md",
-      () => generateOverviewStub(new Date().toISOString()),
+    overviewCreated = await this.createIfMissing("meta/overview.md", () =>
+      generateOverviewStub(new Date().toISOString(), this.mode),
     );
 
     return { contractCreated, overviewCreated, warnings };
@@ -54,7 +53,6 @@ export class VaultAutoInitService {
       return true;
     } catch (err) {
       if (err instanceof NoteAlreadyExistsError) return false;
-      // Write failure (e.g. read-only filesystem) — degrade gracefully
       console.error(`[vault-auto-init] Failed to create ${path}:`, err);
       return false;
     }
