@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { LocalFileSystemAdapter } from "./infrastructure/local-fs-adapter.js";
 import { ChokidarFileWatcher } from "./infrastructure/chokidar-file-watcher.js";
@@ -268,7 +269,7 @@ function isDirectExecution(): boolean {
     return false;
   }
 
-  return import.meta.url === pathToFileURL(entryPoint).href;
+  return import.meta.url === pathToFileURL(realpathSync(entryPoint)).href;
 }
 
 if (isDirectExecution()) {
