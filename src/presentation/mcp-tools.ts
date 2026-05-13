@@ -69,7 +69,6 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   const overviewComposer = new VaultOverviewResourceComposer({
     fsAdapter: deps.fsAdapter,
     statsComposer,
-    vaultScope: deps.vaultScope ?? "general markdown notes vault",
   });
 
   server.registerResource(

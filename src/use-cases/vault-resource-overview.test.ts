@@ -32,17 +32,17 @@ function fakeEmbedder(): IEmbeddingProvider {
   };
 }
 
-function makeComposer(adapter: LocalFileSystemAdapter, vaultScope = "test vault") {
+function makeComposer(adapter: LocalFileSystemAdapter) {
   const statsComposer = new VaultStatsComposer({ fsAdapter: adapter, embedder: fakeEmbedder() });
-  return new VaultOverviewResourceComposer({ fsAdapter: adapter, statsComposer, vaultScope });
+  return new VaultOverviewResourceComposer({ fsAdapter: adapter, statsComposer });
 }
 
 describe("VaultOverviewResourceComposer", () => {
-  it("starts with vault header using vaultScope", async () => {
+  it("starts with # Vault Overview heading", async () => {
     const { adapter } = await makeTempVault();
-    const composer = makeComposer(adapter, "my research vault");
+    const composer = makeComposer(adapter);
     const result = await composer.compose();
-    expect(result).toMatch(/^# Vault: my research vault/);
+    expect(result).toMatch(/^# Vault Overview/);
   });
 
   it("includes Quick Stats section", async () => {
@@ -54,20 +54,13 @@ describe("VaultOverviewResourceComposer", () => {
     expect(result).toContain("**Index status**:");
   });
 
-  it("includes contract.md content when present", async () => {
+  it("does NOT include contract.md content even when present", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("meta/contract.md", "# Vault Navigation Contract\n\n## Scope\n\nMy scope");
     const composer = makeComposer(adapter);
     const result = await composer.compose();
-    expect(result).toContain("# Vault Navigation Contract");
-    expect(result).toContain("My scope");
-  });
-
-  it("omits contract section when contract.md missing", async () => {
-    const { adapter } = await makeTempVault();
-    const composer = makeComposer(adapter);
-    const result = await composer.compose();
     expect(result).not.toContain("Vault Navigation Contract");
+    expect(result).not.toContain("My scope");
   });
 
   it("includes overview.md body when present and non-empty", async () => {
@@ -96,22 +89,13 @@ describe("VaultOverviewResourceComposer", () => {
     expect(result).not.toContain("Leave empty");
   });
 
-  it("sanitizes special characters in vaultScope in header", async () => {
+  it("composes header + stats + overview body when overview has content", async () => {
     const { adapter } = await makeTempVault();
-    const composer = makeComposer(adapter, "vault [notes] with `backticks`");
-    const result = await composer.compose();
-    expect(result).toContain("vault \\[notes\\] with \\`backticks\\`");
-  });
-
-  it("composes all 4 sections when all files present and overview has content", async () => {
-    const { adapter } = await makeTempVault();
-    await adapter.writeNote("meta/contract.md", "# Contract\n\n## Scope\n\nMy scope");
     await adapter.writeNote("meta/overview.md", "---\nschema_version: 1\n---\n\n# Overview\n\nSome content.");
-    const composer = makeComposer(adapter, "full vault");
+    const composer = makeComposer(adapter);
     const result = await composer.compose();
-    expect(result).toContain("# Vault: full vault");
+    expect(result).toContain("# Vault Overview");
     expect(result).toContain("## Quick Stats");
-    expect(result).toContain("# Contract");
     expect(result).toContain("Some content.");
   });
 });

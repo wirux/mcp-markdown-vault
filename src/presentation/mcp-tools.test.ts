@@ -156,7 +156,7 @@ describe("MCP Server — resources and priming", () => {
     const result = await client.readResource({ uri: "vault://overview" });
     const content = result.contents[0];
     expect(content).toBeDefined();
-    expect(getTextResourceContent(content).text.startsWith("# Vault:")).toBe(true);
+    expect(getTextResourceContent(content).text.startsWith("# Vault Overview")).toBe(true);
   });
 
   it("readResource contract returns contract.md content", async () => {
