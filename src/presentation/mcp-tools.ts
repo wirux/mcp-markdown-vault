@@ -39,7 +39,7 @@ export interface McpDependencies {
   backlinkIndex?: BacklinkIndexService | undefined;
   indexer?: VaultIndexer | undefined;
   instructions?: string | undefined;
-  vaultScope?: string | undefined;
+  getVaultScope?: (() => string) | undefined;
 }
 
 /**
@@ -360,7 +360,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      `Read and search markdown notes. Vault scope: ${deps.vaultScope ?? "general markdown notes vault"}.\nActions: search (heading-aware fragment retrieval with TF-IDF + proximity), semantic_search (vector + lexical hybrid for conceptual queries), global_search (cross-vault exact-match grep), outline (file or directory structure tree), read (full file or single section by heading), frontmatter_get (parse YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).`,
+      `Read and search markdown notes. Vault scope: ${(deps.getVaultScope ?? (() => "general markdown notes vault"))()}.\nActions: search (heading-aware fragment retrieval with TF-IDF + proximity), semantic_search (vector + lexical hybrid for conceptual queries), global_search (cross-vault exact-match grep), outline (file or directory structure tree), read (full file or single section by heading), frontmatter_get (parse YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).`,
     inputSchema: {
       action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read", "backlinks"]),
       path: z.string().optional(),
@@ -480,7 +480,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         return Object.assign({}, actionResult as object, {
           _meta: {
             vault_orientation: {
-              scope: deps.vaultScope ?? "general markdown notes vault",
+              scope: (deps.getVaultScope ?? (() => "general markdown notes vault"))(),
               hint: "Read vault://overview resource or meta/contract.md for full conventions.",
             },
           },

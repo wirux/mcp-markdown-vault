@@ -89,7 +89,7 @@ beforeEach(async () => {
     vaultRoot: tmpDir,
     backlinkIndex,
     instructions: "test instructions",
-    vaultScope: "test vault",
+    getVaultScope: () => "test vault",
   };
 
   const server = createMcpServer(deps);
