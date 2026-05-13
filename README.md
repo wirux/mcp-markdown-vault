@@ -196,7 +196,6 @@ The server selects an embedding provider automatically:
 |---|---|---|
 | `VAULT_PATH` | `/vault` | Markdown vault directory |
 | `VAULT_CONTEXT_MODE` | `auto` | Vault orientation mode: `auto` (server generates `meta/overview.md` from structural heuristics) or `manual` (you author `meta/overview.md` yourself) |
-| `VAULT_CONTEXT` | *(deprecated)* | **Deprecated** — ignored. Use `VAULT_CONTEXT_MODE` instead. |
 | `MCP_TRANSPORT_TYPE` | `stdio` | `stdio` (single client) or `sse` (multi-client HTTP) |
 | `PORT` | `3000` | HTTP port (SSE mode only) |
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings |
@@ -242,8 +241,7 @@ In `manual` mode, you author `meta/overview.md` yourself. Set `VAULT_CONTEXT_MOD
       "command": "npx",
       "args": ["-y", "@wirux/mcp-markdown-vault"],
       "env": {
-        "VAULT_PATH": "/path/to/your/vault",
-        "VAULT_CONTEXT_MODE": "manual"
+        "VAULT_PATH": "/path/to/your/vault"
       }
     }
   }

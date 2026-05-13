@@ -54,13 +54,13 @@ describe("VaultOverviewResourceComposer", () => {
     expect(result).toContain("**Index status**:");
   });
 
-  it("does NOT include contract.md content even when present", async () => {
+  it("includes contract.md content when present", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("meta/contract.md", "# Vault Navigation Contract\n\n## Scope\n\nMy scope");
     const composer = makeComposer(adapter);
     const result = await composer.compose();
-    expect(result).not.toContain("Vault Navigation Contract");
-    expect(result).not.toContain("My scope");
+    expect(result).toContain("Vault Navigation Contract");
+    expect(result).toContain("My scope");
   });
 
   it("includes overview.md body when present and non-empty", async () => {

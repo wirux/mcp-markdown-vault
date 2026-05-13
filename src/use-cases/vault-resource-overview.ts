@@ -59,6 +59,14 @@ export class VaultOverviewResourceComposer {
       }
     }
 
+    const contractContent = await this.readFileSafe("meta/contract.md");
+    if (contractContent !== null) {
+      const body = stripFrontmatterAndComments(contractContent);
+      if (body) {
+        sections.push(body);
+      }
+    }
+
     return sections.join("\n\n");
   }
 
