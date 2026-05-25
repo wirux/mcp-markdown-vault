@@ -122,7 +122,7 @@ describe("src/index composition root helpers", () => {
     expect(await fsAdapter.readNote("meta/overview.md")).toBe("# Custom Overview");
   });
 
-  it("auto-init failure still returns instructions and starts composition flow", async () => {
+  it("auto-init failure still returns scope provider and starts composition flow", async () => {
     const { fsAdapter } = await makeTempVault();
     const errors: unknown[][] = [];
     const brokenFsAdapter: IFileSystemAdapter = {
@@ -146,8 +146,8 @@ describe("src/index composition root helpers", () => {
       },
     });
 
-    expect(result.instructions.length).toBeGreaterThan(0);
     expect(typeof result.getVaultScope()).toBe("string");
+    expect(result.scopeProvider.getScope()).toBe(result.getVaultScope());
     expect(errors).toEqual([]);
   });
 
@@ -163,21 +163,21 @@ describe("src/index composition root helpers", () => {
       vectorStore: new InMemoryVectorStore(),
       embedder: new FakeEmbedder(),
       vaultRoot: vaultPath,
-      instructions: orientation.instructions,
       getVaultScope: orientation.getVaultScope,
     });
 
     const instructions = await readInitializeInstructions(serverFactory());
 
-    expect(orientation.instructions.length).toBeGreaterThan(0);
-    expect(instructions).toBe(orientation.instructions);
+    expect(instructions).toBeDefined();
+    expect(instructions!.length).toBeGreaterThan(0);
+    expect(instructions).toContain("Vault scope:");
   });
 
   it("getVaultScope returns default when overview.md does not exist", async () => {
     const { fsAdapter } = await makeTempVault();
-    const getVaultScope = makeVaultScopeProvider(fsAdapter);
+    const provider = makeVaultScopeProvider(fsAdapter);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(getVaultScope()).toBe(DEFAULT_VAULT_SCOPE);
+    expect(provider.getScope()).toBe(DEFAULT_VAULT_SCOPE);
   });
 
   it("createServerFactory injects workflow per server instance while preserving orientation data", async () => {
@@ -193,7 +193,6 @@ describe("src/index composition root helpers", () => {
       vectorStore,
       embedder: new FakeEmbedder(),
       vaultRoot: vaultPath,
-      instructions: orientation.instructions,
       getVaultScope: orientation.getVaultScope,
     });
 
@@ -236,5 +235,128 @@ describe("parseVaultContextConfig integration", () => {
     const { parseVaultContextConfig } = await import("./use-cases/vault-context-config.js");
     const config = parseVaultContextConfig({ VAULT_CONTEXT: "old value" });
     expect(config.deprecatedVaultContext).toBe("old value");
+  });
+});
+
+describe("vault scope from frontmatter integration", () => {
+  it("makeVaultScopeProvider reads vault_scope from frontmatter", async () => {
+    const { fsAdapter } = await makeTempVault();
+    await fsAdapter.writeNote(
+      "meta/overview.md",
+      `---\nschema_version: 1\nvault_scope: "my custom vault scope"\n---\n\n# Overview\n`,
+    );
+
+    const provider = makeVaultScopeProvider(fsAdapter);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(provider.getScope()).toBe("my custom vault scope");
+  });
+
+  it("makeVaultScopeProvider falls back to DEFAULT_VAULT_SCOPE when vault_scope missing", async () => {
+    const { fsAdapter } = await makeTempVault();
+    await fsAdapter.writeNote(
+      "meta/overview.md",
+      `---\nschema_version: 1\nmanaged_by: auto\n---\n\n# Overview\n`,
+    );
+
+    const provider = makeVaultScopeProvider(fsAdapter);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(provider.getScope()).toBe(DEFAULT_VAULT_SCOPE);
+  });
+
+  it("makeVaultScopeProvider.refresh() picks up new vault_scope after overview rewrite", async () => {
+    const { fsAdapter } = await makeTempVault();
+    await fsAdapter.writeNote(
+      "meta/overview.md",
+      `---\nvault_scope: "original scope"\n---\n\n# Overview\n`,
+    );
+
+    const provider = makeVaultScopeProvider(fsAdapter);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(provider.getScope()).toBe("original scope");
+
+    await fsAdapter.writeNote(
+      "meta/overview.md",
+      `---\nvault_scope: "updated scope after refresh"\n---\n\n# Overview\n`,
+      true,
+    );
+    provider.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(provider.getScope()).toBe("updated scope after refresh");
+  });
+
+  it("createServerFactory uses real vault scope in instructions on each server creation", async () => {
+    const { fsAdapter, vaultPath } = await makeTempVault();
+    await fsAdapter.writeNote(
+      "meta/overview.md",
+      `---\nvault_scope: "dynamic scope value"\n---\n\n# Overview\n`,
+    );
+
+    const provider = makeVaultScopeProvider(fsAdapter);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const serverFactory = createServerFactory({
+      fsAdapter,
+      vectorStore: new InMemoryVectorStore(),
+      embedder: new FakeEmbedder(),
+      vaultRoot: vaultPath,
+      getVaultScope: provider.getScope,
+    });
+
+    const instructions = await readInitializeInstructions(serverFactory());
+    expect(instructions).toContain("dynamic scope value");
+  });
+
+  it("after scope refresh, new server sees updated instructions", async () => {
+    const { fsAdapter, vaultPath } = await makeTempVault();
+    await fsAdapter.writeNote(
+      "meta/overview.md",
+      `---\nvault_scope: "scope v1"\n---\n\n# Overview\n`,
+    );
+
+    const provider = makeVaultScopeProvider(fsAdapter);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const serverFactory = createServerFactory({
+      fsAdapter,
+      vectorStore: new InMemoryVectorStore(),
+      embedder: new FakeEmbedder(),
+      vaultRoot: vaultPath,
+      getVaultScope: provider.getScope,
+    });
+
+    const instructions1 = await readInitializeInstructions(serverFactory());
+    expect(instructions1).toContain("scope v1");
+
+    await fsAdapter.writeNote(
+      "meta/overview.md",
+      `---\nvault_scope: "scope v2"\n---\n\n# Overview\n`,
+      true,
+    );
+    provider.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const instructions2 = await readInitializeInstructions(serverFactory());
+    expect(instructions2).toContain("scope v2");
+    expect(instructions2).not.toContain("scope v1");
+  });
+
+  it("manual mode: user-authored overview with vault_scope is respected", async () => {
+    const { fsAdapter } = await makeTempVault();
+    await fsAdapter.writeNote(
+      "meta/overview.md",
+      `---\nschema_version: 1\nmanaged_by: user\nvault_scope: "user-written scope"\n---\n\n# My Vault\n`,
+    );
+
+    const orientation = await initializeVaultOrientation({
+      fsAdapter,
+      mode: "manual",
+      logger: { error: () => undefined },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(orientation.getVaultScope()).toBe("user-written scope");
   });
 });
