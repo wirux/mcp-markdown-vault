@@ -74,7 +74,7 @@ export class OverviewManager {
 
   async writeOverview(): Promise<void> {
     const content = await this.generate();
-    await this.fsAdapter.writeNote("meta/overview.md", content);
+    await this.fsAdapter.writeNote("meta/overview.md", content, true);
   }
 
   shouldRefresh(changeCount: number): boolean {
