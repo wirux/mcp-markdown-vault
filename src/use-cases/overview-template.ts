@@ -5,6 +5,7 @@ schema_version: 1
 generated_by: mcp-markdown-vault
 generated_at: ${timestamp}
 managed_by: auto
+vault_scope: "general markdown notes vault"
 ---
 
 # Vault Overview
@@ -18,12 +19,13 @@ schema_version: 1
 generated_by: mcp-markdown-vault
 generated_at: ${timestamp}
 managed_by: user
+vault_scope: "describe your vault contents here"
 ---
 
 # Vault Overview
 
 <!-- Free-form narrative about this vault's current contents and state.
      Fully user-controlled — the server never modifies this file after creation.
-     Leave empty if you don't want to maintain it manually. -->
+     Edit vault_scope above to set the one-line description shown to MCP hosts. -->
 `;
 }

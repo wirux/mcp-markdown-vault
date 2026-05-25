@@ -117,6 +117,29 @@ describe("OverviewManager", () => {
     expect(written).toContain("- Written");
   });
 
+  it("overwrites existing meta/overview.md stub on subsequent writeOverview calls", async () => {
+    const { adapter } = await makeTempVault();
+    // Simulate auto-init creating the stub first
+    await adapter.writeNote(
+      "meta/overview.md",
+      "---\nschema_version: 1\nmanaged_by: auto\n---\n\n# Vault Overview\n\n<!-- stub -->\n",
+    );
+    // Add real content to the vault
+    await adapter.writeNote("docs/note.md", "---\ntags: testing\n---\n# My Note\n");
+
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    // This must NOT throw NoteAlreadyExistsError — it must overwrite
+    await manager.writeOverview();
+
+    const content = await adapter.readNote("meta/overview.md");
+    expect(content).toContain("## Statistics");
+    expect(content).toContain("- **Total files**: 1");
+    expect(content).toContain("- `testing` (1)");
+    expect(content).toContain("- My Note");
+    expect(content).not.toContain("<!-- stub -->");
+  });
+
   it("shouldRefresh uses default threshold of five", () => {
     const manager = new OverviewManager({
       fsAdapter: {

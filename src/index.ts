@@ -31,13 +31,19 @@ import {
   type VaultContextMode,
 } from "./use-cases/vault-context-config.js";
 import { OverviewManager } from "./use-cases/overview-manager.js";
+import { extractVaultScopeFromFrontmatter } from "./use-cases/vault-scope.js";
 
 export const DEFAULT_VAULT_SCOPE = "general markdown notes vault";
 
+export interface VaultScopeProvider {
+  getScope: () => string;
+  refresh: () => void;
+}
+
 export interface VaultOrientation {
   initResult: AutoInitResult;
+  scopeProvider: VaultScopeProvider;
   getVaultScope: () => string;
-  instructions: string;
 }
 
 export async function initializeVaultOrientation(deps: {
@@ -69,32 +75,28 @@ export async function initializeVaultOrientation(deps: {
     logger.error(`[warn] ${warning}`);
   }
 
-  const getVaultScope = makeVaultScopeProvider(deps.fsAdapter);
+  const scopeProvider = makeVaultScopeProvider(deps.fsAdapter);
 
   return {
     initResult,
-    getVaultScope,
-    instructions: composeInstructions(DEFAULT_VAULT_SCOPE),
+    scopeProvider,
+    getVaultScope: scopeProvider.getScope,
   };
 }
 
 export function makeVaultScopeProvider(
   fsAdapter: IFileSystemAdapter,
-): () => string {
+): VaultScopeProvider {
   let cached: string = DEFAULT_VAULT_SCOPE;
 
   const refresh = (): void => {
     fsAdapter.readNote("meta/overview.md").then((content) => {
-      const firstMeaningfulLine = content
-        .split("\n")
-        .map((l) => l.trim())
-        .find((l) => l.length > 0 && !l.startsWith("---") && !l.startsWith("#") && !l.startsWith("schema_version") && !l.startsWith("generated") && !l.startsWith("managed_by"));
-      cached = firstMeaningfulLine ?? DEFAULT_VAULT_SCOPE;
+      cached = extractVaultScopeFromFrontmatter(content) ?? DEFAULT_VAULT_SCOPE;
     }).catch(() => { cached = DEFAULT_VAULT_SCOPE; });
   };
 
   refresh();
-  return () => cached;
+  return { getScope: () => cached, refresh };
 }
 
 export function createServerFactory(
@@ -104,6 +106,9 @@ export function createServerFactory(
     createMcpServer({
       ...deps,
       workflow: new WorkflowStateMachine(),
+      instructions: composeInstructions(
+        (deps.getVaultScope ?? (() => DEFAULT_VAULT_SCOPE))(),
+      ),
     });
 }
 
@@ -171,7 +176,7 @@ async function main(): Promise<void> {
   const allowReset = process.env["VECTOR_STORE_RESET"] === "true";
 
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
-  const { getVaultScope, instructions } = await initializeVaultOrientation({
+  const { scopeProvider, getVaultScope } = await initializeVaultOrientation({
     fsAdapter,
     mode: config.mode,
   });
@@ -219,7 +224,9 @@ async function main(): Promise<void> {
   if (config.mode === "auto") {
     overviewManager = new OverviewManager({ fsAdapter });
     indexer.addOnThresholdReached(() => {
-      overviewManager!.writeOverview().catch((err: unknown) =>
+      overviewManager!.writeOverview().then(() => {
+        scopeProvider.refresh();
+      }).catch((err: unknown) =>
         console.error("Overview refresh failed:", err),
       );
       indexer.resetChangeCount();
@@ -233,7 +240,6 @@ async function main(): Promise<void> {
     vaultRoot,
     backlinkIndex,
     indexer,
-    instructions,
     getVaultScope,
   });
 
@@ -253,6 +259,7 @@ async function main(): Promise<void> {
         await overviewManager.writeOverview().catch((err: unknown) =>
           console.error("Initial overview generation failed:", err),
         );
+        scopeProvider.refresh();
       }
     })
     .catch((err: unknown) =>

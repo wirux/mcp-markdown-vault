@@ -509,6 +509,132 @@ describe("VaultIndexer", () => {
 
       expect(await store.has("gone.md")).toBe(false);
     });
+
+    it("unlink does not increment failureCount or set lastFailure", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "delete-me.md"),
+        "# Delete\n\nContent.\n",
+      );
+      await indexer.indexFile("delete-me.md");
+
+      await indexer.startWatching({ debounceMs: 50 });
+
+      await fs.unlink(path.join(tmpDir, "delete-me.md"));
+      watcher.emit("unlink", path.join(tmpDir, "delete-me.md"));
+
+      await sleep(100);
+
+      expect(indexer.failureCount).toBe(0);
+      expect(indexer.lastFailureTime).toBeNull();
+      expect(indexer.lastFailureSource).toBeNull();
+
+      const status = await indexer.getHealthStatus();
+      expect(status.failureCount).toBe(0);
+      expect(status.lastFailure).toBeNull();
+    });
+
+    it("queued file deleted before drain does not set lastFailure", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "race.md"),
+        "# Race\n\nContent.\n",
+      );
+      await indexer.indexFile("race.md");
+
+      await indexer.startWatching({ debounceMs: 50 });
+
+      watcher.emit("change", path.join(tmpDir, "race.md"));
+      await fs.unlink(path.join(tmpDir, "race.md"));
+
+      await sleep(200);
+
+      expect(indexer.failureCount).toBe(0);
+      expect(indexer.lastFailureSource).toBeNull();
+      expect(await store.has("race.md")).toBe(false);
+    });
+
+    it("does not count a file disappearing between exists check and read as failure", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "toctou.md"),
+        "# TOCTOU\n\nContent.\n",
+      );
+      await indexer.indexFile("toctou.md");
+
+      const originalExists = fsAdapter.exists.bind(fsAdapter);
+      let deleteAfterExists = false;
+      fsAdapter.exists = async (notePath: string) => {
+        const exists = await originalExists(notePath);
+        if (notePath === "toctou.md" && exists && !deleteAfterExists) {
+          deleteAfterExists = true;
+          await fs.unlink(path.join(tmpDir, "toctou.md"));
+        }
+        return exists;
+      };
+
+      await indexer.startWatching({ debounceMs: 50 });
+      watcher.emit("change", path.join(tmpDir, "toctou.md"));
+
+      await sleep(200);
+
+      expect(indexer.failureCount).toBe(0);
+      expect(indexer.lastFailureTime).toBeNull();
+      expect(indexer.lastFailureSource).toBeNull();
+      expect(await store.has("toctou.md")).toBe(false);
+
+      const status = await indexer.getHealthStatus();
+      expect(status.failureCount).toBe(0);
+      expect(status.lastFailure).toBeNull();
+    });
+
+    it("genuine embed failure still increments failureCount and sets lastFailure", async () => {
+      const origEmbed = embedder.embed.bind(embedder);
+      embedder.embed = async (text: string) => {
+        if (text.includes("RealFail")) throw new Error("embedder crashed");
+        return origEmbed(text);
+      };
+
+      await indexer.startWatching({ debounceMs: 50 });
+
+      await fs.writeFile(
+        path.join(tmpDir, "real-fail.md"),
+        "# RealFail\n\nContent that triggers embed crash.\n",
+      );
+      watcher.emit("add", path.join(tmpDir, "real-fail.md"));
+
+      await sleep(200);
+
+      expect(indexer.failureCount).toBe(1);
+      expect(indexer.lastFailureTime).toBeInstanceOf(Date);
+      expect(indexer.lastFailureSource).toBe("real-fail.md");
+
+      const status = await indexer.getHealthStatus();
+      expect(status.failureCount).toBe(1);
+      expect(status.lastFailure).not.toBeNull();
+      expect(status.lastFailure!.source).toBe("real-fail.md");
+    });
+
+    it("health status remains clean after multiple normal deletes", async () => {
+      for (let i = 1; i <= 5; i++) {
+        await fs.writeFile(
+          path.join(tmpDir, `multi-del-${i}.md`),
+          `# File ${i}\n\nContent.\n`,
+        );
+        await indexer.indexFile(`multi-del-${i}.md`);
+      }
+
+      await indexer.startWatching({ debounceMs: 50 });
+
+      for (let i = 1; i <= 5; i++) {
+        await fs.unlink(path.join(tmpDir, `multi-del-${i}.md`));
+        watcher.emit("unlink", path.join(tmpDir, `multi-del-${i}.md`));
+      }
+
+      await sleep(300);
+
+      const status = await indexer.getHealthStatus();
+      expect(status.failureCount).toBe(0);
+      expect(status.lastFailure).toBeNull();
+      expect(status.indexingState).toBe("watching");
+    });
   });
   describe("getHealthStatus", () => {
     it("returns idle state with zero counters when freshly created", async () => {

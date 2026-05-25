@@ -6,16 +6,14 @@
 
 `npm install` and point it at a folder. Hybrid search, AST editing, zero-config embeddings. No app, no plugins, no API keys.
 
-<!-- Note: Badge URLs reference the current GitHub repo (Wirux/mcp-obsidian). -->
-<!-- Update these if/when the repo is renamed to mcp-markdown-vault. -->
-[![CI / Release](https://github.com/Wirux/mcp-obsidian/actions/workflows/release.yml/badge.svg)](https://github.com/Wirux/mcp-obsidian/actions/workflows/release.yml)
-[![PR Check](https://github.com/Wirux/mcp-obsidian/actions/workflows/pr-check.yml/badge.svg)](https://github.com/Wirux/mcp-obsidian/actions/workflows/pr-check.yml)
+[![CI / Release](https://github.com/wirux/mcp-markdown-vault/actions/workflows/release.yml/badge.svg)](https://github.com/wirux/mcp-markdown-vault/actions/workflows/release.yml)
+[![PR Check](https://github.com/wirux/mcp-markdown-vault/actions/workflows/pr-check.yml/badge.svg)](https://github.com/wirux/mcp-markdown-vault/actions/workflows/pr-check.yml)
 [![npm version](https://img.shields.io/npm/v/@wirux/mcp-markdown-vault?color=cb3837&logo=npm)](https://www.npmjs.com/package/@wirux/mcp-markdown-vault)
-[![Docker](https://img.shields.io/badge/ghcr.io-mcp--markdown--vault-blue?logo=docker)](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-markdown-vault)
+[![Docker](https://img.shields.io/badge/ghcr.io-mcp--markdown--vault-blue?logo=docker)](https://github.com/wirux/mcp-markdown-vault/pkgs/container/mcp-markdown-vault)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-516%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-568%20passed-brightgreen?logo=vitest&logoColor=white)](#-testing)
 [![mcp-markdown-vault MCP server](https://glama.ai/mcp/servers/wirux/mcp-markdown-vault/badges/score.svg)](https://glama.ai/mcp/servers/wirux/mcp-markdown-vault)
 
 </div>
@@ -78,7 +76,7 @@
 | Tool | Actions | Description |
 |---|---|---|
 | 📁 **vault** | `list` `read` `create` `update` `delete` `stat` `create_from_template` | Full CRUD for vault notes + template scaffolding |
-| ✏️ **edit** | `append` `prepend` `replace` `line_replace` `string_replace` `frontmatter_set` `batch` | AST-based patching + freeform fallback + frontmatter update + batch edit (supports `dryRun` diff preview) |
+| ✏️ **edit** | `append` `prepend` `replace` `line_replace` `string_replace` `frontmatter_set` + `operations[]` batch mode | AST-based patching + freeform fallback + frontmatter update + batch edit (supports `dryRun` diff preview) |
 | 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` `frontmatter_get` `bulk_read` `backlinks` | Fragment retrieval, cross-vault search, hybrid semantic search, read by heading, frontmatter read, bulk read, backlinks |
 | 🔄 **workflow** | `status` `transition` `history` `reset` | Petri net state machine control |
 | ⚙️ **system** | `status` `reindex` `overview` | Server health, indexing info, vault structure overview |
@@ -147,8 +145,8 @@ Edit `docker-compose.yml` to point at your markdown vault directory. The default
 ### 🛠️ Development (from source)
 
 ```bash
-git clone https://github.com/Wirux/mcp-obsidian.git
-cd mcp-obsidian
+git clone https://github.com/wirux/mcp-markdown-vault.git
+cd mcp-markdown-vault
 npm install
 npm run build
 VAULT_PATH=/path/to/your/vault node dist/index.js
@@ -195,14 +193,19 @@ The server selects an embedding provider automatically:
 | Variable | Default | Description |
 |---|---|---|
 | `VAULT_PATH` | `/vault` | Markdown vault directory |
-| `VAULT_CONTEXT_MODE` | `auto` | Vault orientation mode: `auto` (server generates `meta/overview.md` from structural heuristics) or `manual` (you author `meta/overview.md` yourself) |
+| `VAULT_CONTEXT_MODE` | `auto` | Vault orientation mode: `auto` (server generates and refreshes `meta/overview.md`, including the `vault_scope` frontmatter) or `manual` (you author `meta/overview.md` yourself) |
+| `VAULT_CONTEXT` | *(deprecated)* | Deprecated and ignored. Use `VAULT_CONTEXT_MODE` instead. |
 | `MCP_TRANSPORT_TYPE` | `stdio` | `stdio` (single client) or `sse` (multi-client HTTP) |
 | `PORT` | `3000` | HTTP port (SSE mode only) |
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings |
 | `OLLAMA_MODEL` | `nomic-embed-text` | Ollama embedding model name |
 | `OLLAMA_DIMENSIONS` | `768` | Ollama embedding vector dimensions |
 | `VECTOR_STORE_URL` | *(unset)* | Set to use Qdrant (e.g. `http://localhost:6333`). If unset, local persisted flat store is used. |
+| `VECTOR_STORE_COLLECTION` | `markdown_vault` | Qdrant collection name when `VECTOR_STORE_URL` is set. |
 | `VECTOR_STORE_RESET` | `false` | Set to `true` to auto-delete a mismatched vector index on startup and rebuild from scratch. |
+| `MCP_AUTH_TOKEN` | *(unset)* | Bearer token for SSE transport auth. If set, all SSE endpoints require `Authorization: Bearer <token>`. |
+| `HOST_BIND_ADDRESS` | `127.0.0.1` | Bind address for the SSE HTTP server. |
+| `BODY_LIMIT_BYTES` | `1mb` | Max JSON request body size for SSE `POST /messages`. |
 
 > **Note**: When using the default local vector store, a `.markdown_vault_mcp` directory will be created in your vault. It's recommended to add this directory to your `.gitignore`.
 
@@ -230,9 +233,9 @@ When an MCP client connects, the server automatically provides vault context so 
 
 ### Making agents find your vault
 
-In `auto` mode (the default), the server generates `meta/overview.md` automatically after startup using structural heuristics: top directories, file counts, tag frequency, and H1 headings from top files. No configuration needed.
+In `auto` mode (the default), the server generates `meta/overview.md` automatically after startup using structural heuristics: top directories, file counts, tag frequency, and H1 headings. It also writes a one-line `vault_scope` field in the frontmatter, which is the host-visible description used for MCP handshake instructions, tool descriptions, and first-call priming.
 
-In `manual` mode, you author `meta/overview.md` yourself. Set `VAULT_CONTEXT_MODE=manual` and write whatever helps an agent understand your vault:
+In `manual` mode, you author `meta/overview.md` yourself. Set `VAULT_CONTEXT_MODE=manual`, edit the `vault_scope` frontmatter for the one-line host-visible description, and use the markdown body for richer narrative context:
 
 ```json
 {
@@ -248,7 +251,7 @@ In `manual` mode, you author `meta/overview.md` yourself. Set `VAULT_CONTEXT_MOD
 }
 ```
 
-In both modes, `meta/overview.md` is the canonical source of vault description for connected agents.
+In both modes, `meta/overview.md` is the canonical source of vault description for connected agents: `vault_scope` in frontmatter supplies the short description, and the markdown body feeds the richer `vault://overview` resource.
 
 ### How context is delivered
 
@@ -256,16 +259,16 @@ The server uses four complementary mechanisms so behavior degrades gracefully ac
 
 | Mechanism | When | What the agent sees |
 |---|---|---|
-| **`instructions` field** | MCP handshake (session start) | Vault scope + tool dispatcher summary. Supported by Claude Desktop, Claude Code, Cursor. |
+| **`instructions` field** | MCP handshake (session start) | The current `vault_scope` + tool dispatcher summary. Supported by Claude Desktop, Claude Code, Cursor. |
 | **MCP Resources** | On-demand via `ReadResource` | `vault://overview` (composed view with live stats, overview, and conventions), `vault://stats` (live JSON) |
-| **First-call priming** | First `view` tool call per session | `_meta.vault_orientation` block with scope + hint to read `vault://overview` |
-| **`view` tool description** | Tool listing | Includes the vault scope string from `meta/overview.md` for tool-selection matching |
+| **First-call priming** | First `view` tool call per session | `_meta.vault_orientation` block with the current `vault_scope` + hint to read `vault://overview` |
+| **`view` tool description** | Tool listing | Includes the current `vault_scope` string for tool-selection matching |
 
 Even if a client supports none of these (rare), the agent still discovers vault content through normal tool use.
 
 ### Two files: contract vs overview
 
-On first startup, the server creates two files in `<VAULT_PATH>/meta/`. In `manual` mode, both are created once and **never overwritten** — they are fully yours to edit. In `auto` mode, `meta/overview.md` is regenerated automatically after indexing completes and after every 5 meaningful file changes; `meta/contract.md` is still created once and never overwritten.
+On first startup, the server creates two files in `<VAULT_PATH>/meta/`. In `manual` mode, both are created once and **never overwritten** — they are fully yours to edit. In `auto` mode, `meta/overview.md` is regenerated automatically after indexing completes and after every 5 meaningful file changes; its `vault_scope` frontmatter is refreshed at the same time. `meta/contract.md` is still created once and never overwritten.
 
 #### `meta/contract.md` — Tool optimization (power users)
 
@@ -281,22 +284,24 @@ Tells agents **how** to use the vault's tools efficiently. Pre-filled with sensi
 
 Most users don't need to edit this. Power users can customize it to match their vault's specific conventions — agents read it as part of the `vault://overview` resource.
 
-> **Tip:** Add a `## Scope` section for a richer, multi-line vault description. Agents see it when reading the `vault://overview` resource.
+> **Tip:** Keep `vault_scope` short and specific — it is the one-line summary exposed to MCP hosts. Put richer, multi-line context in the body of `meta/overview.md`.
 
 #### `meta/overview.md` — Vault description (read-side)
 
-In `auto` mode: auto-generated after startup and refreshed after every 5 meaningful file changes. Contains top directories, file counts, tag frequency, and H1 headings from top files.
+In `auto` mode: auto-generated after startup and refreshed after every 5 meaningful file changes. The frontmatter contains `vault_scope`, a generated one-line summary capped to a fixed maximum length for host-visible context. The body contains top directories, file counts, tag frequency, and recent note titles.
 
-In `manual` mode: created as an empty stub. Write here whatever helps an agent understand your vault's content: active projects, key topic areas, organizational philosophy.
+In `manual` mode: created as an editable stub. Set `vault_scope` in frontmatter to control the one-line host-visible description, then write whatever helps an agent understand your vault's content in the body: active projects, key topic areas, organizational philosophy.
 
-Its content is the primary source for the `vault://overview` resource that agents read on demand.
+Its frontmatter `vault_scope` is the primary source for handshake-visible one-line context, and its body is the primary source for the `vault://overview` resource that agents read on demand.
 
 ### Hot reload behavior
 
 | What changed | Effect | Restart needed? |
 |---|---|---|
 | `meta/contract.md` | Reflected in `vault://overview` on next read | No |
-| `meta/overview.md` | Reflected in `vault://overview` on next read | No |
+| `meta/overview.md` body | Reflected in `vault://overview` on next read | No |
+| Auto-generated `vault_scope` refresh | Picked up automatically when auto mode rewrites `meta/overview.md` | No |
+| Manual edits to `vault_scope` | Reflected in `vault://overview` on next read; restart/reconnect to guarantee new handshake-visible scope | Usually yes |
 | `VAULT_CONTEXT_MODE` env var | Changes auto vs manual behavior | Yes |
 
 ### Migration notes
@@ -319,13 +324,13 @@ Fully automated via GitHub Actions and [Semantic Release](https://semantic-relea
 - Versioning follows [Conventional Commits](https://www.conventionalcommits.org/) — `feat:` = minor, `fix:` = patch, `feat!:` / `BREAKING CHANGE:` = major
 - Docker images are built for `linux/amd64` and `linux/arm64` via QEMU
 - NPM package published as [`@wirux/mcp-markdown-vault`](https://www.npmjs.com/package/@wirux/mcp-markdown-vault)
-- Docker image available at [`ghcr.io/wirux/mcp-markdown-vault`](https://github.com/Wirux/mcp-obsidian/pkgs/container/mcp-markdown-vault)
+- Docker image available at [`ghcr.io/wirux/mcp-markdown-vault`](https://github.com/wirux/mcp-markdown-vault/pkgs/container/mcp-markdown-vault)
 
 ---
 
 ## 🧪 Testing
 
-**516 tests** across 46 files, written test-first (TDD).
+**568 tests** across 49 files, written test-first (TDD).
 
 ```bash
 npm test                                          # Run all tests

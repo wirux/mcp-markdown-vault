@@ -1,5 +1,6 @@
 import yaml from "js-yaml";
 import type { IFileSystemAdapter } from "../domain/interfaces/file-system-adapter.js";
+import { generateVaultScope } from "./vault-scope.js";
 
 interface DirectorySummary {
   name: string;
@@ -42,12 +43,19 @@ export class OverviewManager {
         .filter((directory): directory is string => directory !== undefined),
     ).size;
 
+    const vaultScope = generateVaultScope({
+      totalFiles: nonMetaNotePaths.length,
+      directories: topDirectories,
+      tags,
+    });
+
     return [
       "---",
       "schema_version: 1",
       "generated_by: mcp-markdown-vault",
       `generated_at: ${timestamp}`,
       "managed_by: auto",
+      `vault_scope: ${JSON.stringify(vaultScope)}`,
       "---",
       "",
       "# Vault Overview",
@@ -74,7 +82,7 @@ export class OverviewManager {
 
   async writeOverview(): Promise<void> {
     const content = await this.generate();
-    await this.fsAdapter.writeNote("meta/overview.md", content);
+    await this.fsAdapter.writeNote("meta/overview.md", content, true);
   }
 
   shouldRefresh(changeCount: number): boolean {

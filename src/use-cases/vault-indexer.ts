@@ -6,6 +6,7 @@ import type {
   IVectorStore,
   VectorChunk,
 } from "../domain/interfaces/index.js";
+import { NoteNotFoundError } from "../domain/errors/index.js";
 import { MarkdownChunker } from "./chunker.js";
 import { MarkdownPipeline } from "./markdown-pipeline.js";
 
@@ -192,11 +193,17 @@ export class VaultIndexer {
     for (const relPath of paths) {
       try {
         if (!(await this.fs.exists(relPath))) {
-          throw new Error("File not found");
+          // File disappeared before processing — expected removal, not a failure.
+          await this.removeFile(relPath);
+          continue;
         }
         await this.indexFile(relPath);
-      } catch {
-        // File was deleted between enqueue and process
+      } catch (error) {
+        if (isExpectedMissingNote(error)) {
+          await this.removeFile(relPath);
+          continue;
+        }
+        // Genuine indexing failure (embed/read/upsert error on an existing file).
         await this.removeFile(relPath);
       }
     }
@@ -212,10 +219,15 @@ export class VaultIndexer {
         for (const relPath of paths) {
           try {
             if (!(await this.fs.exists(relPath))) {
-              throw new Error("File not found");
+              await this.removeFile(relPath);
+              continue;
             }
             await this.indexFile(relPath);
-          } catch {
+          } catch (error) {
+            if (isExpectedMissingNote(error)) {
+              await this.removeFile(relPath);
+              continue;
+            }
             this.failureCount++;
             this.lastFailureTime = new Date();
             this.lastFailureSource = relPath;
@@ -328,4 +340,8 @@ export class VaultIndexer {
       this.resetChangeCount();
     }
   }
+}
+
+function isExpectedMissingNote(error: unknown): boolean {
+  return error instanceof NoteNotFoundError;
 }
