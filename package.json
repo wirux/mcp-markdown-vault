@@ -1,6 +1,6 @@
 {
   "name": "@wirux/mcp-markdown-vault",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Headless semantic MCP server for Obsidian, Logseq, Dendron and any markdown-based knowledge base",
   "type": "module",
   "publishConfig": {
