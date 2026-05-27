@@ -12,7 +12,7 @@ import {
   validateVectorStore,
   StartupError,
 } from "./infrastructure/startup-checks.js";
-import type { IEmbeddingProvider, ISamplingProvider } from "./domain/interfaces/index.js";
+import type { IEmbeddingProvider } from "./domain/interfaces/index.js";
 import type { IFileSystemAdapter } from "./domain/interfaces/file-system-adapter.js";
 import { WorkflowStateMachine } from "./use-cases/workflow-state.js";
 import { VaultIndexer } from "./use-cases/vault-indexer.js";
@@ -30,10 +30,7 @@ import {
   logDeprecationWarning,
   type VaultContextMode,
 } from "./use-cases/vault-context-config.js";
-import { OverviewManager } from "./use-cases/overview-manager.js";
 import { extractVaultScopeFromFrontmatter } from "./use-cases/vault-scope.js";
-import { SamplingProviderRegistry } from "./presentation/sampling-provider-registry.js";
-import { McpSamplingAdapter } from "./presentation/mcp-sampling-adapter.js";
 
 export const DEFAULT_VAULT_SCOPE = "general markdown notes vault";
 
@@ -103,9 +100,7 @@ export function makeVaultScopeProvider(
 
 export function createServerFactory(
   deps: Omit<McpDependencies, "workflow">,
-  registry?: SamplingProviderRegistry,
 ): { factory: () => ReturnType<typeof createMcpServer>; unregisterForServer: (server: ReturnType<typeof createMcpServer>) => void } {
-  const serverAdapterMap = new Map<ReturnType<typeof createMcpServer>, ISamplingProvider>();
   const factory = () => {
     const server = createMcpServer({
       ...deps,
@@ -114,19 +109,9 @@ export function createServerFactory(
         (deps.getVaultScope ?? (() => DEFAULT_VAULT_SCOPE))(),
       ),
     });
-    if (registry !== undefined) {
-      const adapter = new McpSamplingAdapter(server);
-      registry.register(adapter);
-      serverAdapterMap.set(server, adapter);
-    }
     return server;
   };
-  const unregisterForServer = (server: ReturnType<typeof createMcpServer>) => {
-    const adapter = serverAdapterMap.get(server);
-    if (adapter !== undefined && registry !== undefined) {
-      registry.unregister(adapter);
-      serverAdapterMap.delete(server);
-    }
+  const unregisterForServer = (_server: ReturnType<typeof createMcpServer>) => {
   };
   return { factory, unregisterForServer };
 }
@@ -195,7 +180,7 @@ async function main(): Promise<void> {
   const allowReset = process.env["VECTOR_STORE_RESET"] === "true";
 
   const fsAdapter = await LocalFileSystemAdapter.create(vaultRoot);
-  const { scopeProvider, getVaultScope } = await initializeVaultOrientation({
+  const { getVaultScope } = await initializeVaultOrientation({
     fsAdapter,
     mode: config.mode,
   });
@@ -239,24 +224,6 @@ async function main(): Promise<void> {
     backlinkIndex.removeFile(relPath);
   });
 
-  let overviewManager: OverviewManager | undefined;
-  let samplingRegistry: SamplingProviderRegistry | undefined;
-  if (config.mode === "auto") {
-    samplingRegistry = new SamplingProviderRegistry();
-    overviewManager = new OverviewManager({
-      fsAdapter,
-      getSamplingProvider: () => samplingRegistry!.getProvider(),
-    });
-    indexer.addOnThresholdReached(() => {
-      overviewManager!.writeOverview().then(() => {
-        scopeProvider.refresh();
-      }).catch((err: unknown) =>
-        console.error("Overview refresh failed:", err),
-      );
-      indexer.resetChangeCount();
-    });
-  }
-
   const { factory: serverFactory, unregisterForServer } = createServerFactory({
     fsAdapter,
     vectorStore,
@@ -265,7 +232,7 @@ async function main(): Promise<void> {
     backlinkIndex,
     indexer,
     getVaultScope,
-  }, samplingRegistry);
+  });
 
   indexer
     .indexAll()
@@ -279,12 +246,7 @@ async function main(): Promise<void> {
       );
       backlinkIndex.rebuildIndex(entries);
       console.error(`Backlink index built: ${allFiles.length} files`);
-      if (overviewManager !== undefined) {
-        await overviewManager.writeOverview().catch((err: unknown) =>
-          console.error("Initial overview generation failed:", err),
-        );
-        scopeProvider.refresh();
-      }
+
     })
     .catch((err: unknown) =>
       console.error("Initial indexing failed:", err),

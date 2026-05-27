@@ -132,10 +132,11 @@ describe("MCP Server — tool listing", () => {
     }
   });
 
-  it("view tool description includes vault scope text", async () => {
+  it("all tool descriptions include vault scope text", async () => {
     const result = await client.listTools();
-    const viewTool = result.tools.find((tool) => tool.name === "view");
-    expect(viewTool?.description).toContain("Vault scope: test vault");
+    for (const tool of result.tools) {
+      expect(tool.description).toContain("test vault");
+    }
   });
 });
 
@@ -157,6 +158,17 @@ describe("MCP Server — resources and priming", () => {
     const content = result.contents[0];
     expect(content).toBeDefined();
     expect(getTextResourceContent(content).text.startsWith("# Vault Overview")).toBe(true);
+  });
+
+  it("readResource overview includes agent orientation guidance", async () => {
+    const result = await client.readResource({ uri: "vault://overview" });
+    const text = getTextResourceContent(result.contents[0]).text;
+
+    expect(text).toContain("## Agent Orientation");
+    expect(text).toContain("### Search Strategy");
+    expect(text).toContain("view.semantic_search");
+    expect(text).toContain("dryRun=true");
+    expect(text).toContain("system.prepare_overview");
   });
 
   it("readResource overview includes contract.md content when present", async () => {
@@ -188,24 +200,22 @@ describe("MCP Server — resources and priming", () => {
     expect(parsed.embeddingProvider).toBe("fake");
   });
 
-  it("first view tool call returns vault orientation priming metadata", async () => {
+  it("first tool call returns vault orientation priming metadata", async () => {
     const result = await client.callTool({
-      name: "view",
-      arguments: { action: "backlinks", path: "hello.md" },
+      name: "vault",
+      arguments: { action: "list" },
     });
     const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
 
-    expect(parsed.result._meta.vault_orientation).toEqual({
+    expect(parsed.result).toEqual(["daily/2024-01-01.md", "hello.md"]);
+    expect(parsed._meta.vault_orientation).toEqual({
       scope: "test vault",
-      hint: "Read vault://overview resource for full vault context and conventions.",
+      hint: "Read vault://overview resource for full vault context, search strategy, workflow guidance, and conventions.",
     });
   });
 
-  it("second view tool call does not return vault orientation priming metadata", async () => {
-    await client.callTool({
-      name: "view",
-      arguments: { action: "backlinks", path: "hello.md" },
-    });
+  it("second tool call does not return vault orientation priming metadata", async () => {
+    await client.callTool({ name: "vault", arguments: { action: "list" } });
 
     const secondResult = await client.callTool({
       name: "view",
@@ -213,17 +223,7 @@ describe("MCP Server — resources and priming", () => {
     });
     const parsed = JSON.parse((secondResult.content as Array<{ type: string; text: string }>)[0]!.text);
 
-    expect(parsed.result._meta).toBeUndefined();
-  });
-
-  it("vault tool first call does not return vault orientation priming metadata", async () => {
-    const result = await client.callTool({
-      name: "vault",
-      arguments: { action: "list" },
-    });
-    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
-
-    expect(parsed.result._meta).toBeUndefined();
+    expect(parsed._meta).toBeUndefined();
   });
 
   it("server initialization result includes non-empty instructions", () => {
@@ -714,6 +714,53 @@ describe("backlink index — live updates via MCP operations", () => {
   });
 });
 
+// ── rebuild-overview prompt ───────────────────────────────────────
+
+describe("MCP Server — rebuild-overview prompt", () => {
+  it("prompt is discoverable via listPrompts", async () => {
+    const result = await client.listPrompts();
+    const names = result.prompts.map((p) => p.name);
+    expect(names).toContain("rebuild-overview");
+    expect(names).not.toContain("vault-rebuild-overview");
+  });
+
+  it("prompt has a description in the listing", async () => {
+    const result = await client.listPrompts();
+    const prompt = result.prompts.find((p) => p.name === "rebuild-overview");
+    expect(prompt?.description).toBeTruthy();
+  });
+
+  it("getPrompt returns instructions mentioning prepare_overview", async () => {
+    const result = await client.getPrompt({ name: "rebuild-overview" });
+    const text = result.messages[0]!.content as { type: string; text: string };
+    expect(text.text).toContain("prepare_overview");
+  });
+
+  it("getPrompt returns instructions mentioning save_overview", async () => {
+    const result = await client.getPrompt({ name: "rebuild-overview" });
+    const text = result.messages[0]!.content as { type: string; text: string };
+    expect(text.text).toContain("save_overview");
+  });
+
+  it("getPrompt returns instructions mentioning vault://overview", async () => {
+    const result = await client.getPrompt({ name: "rebuild-overview" });
+    const text = result.messages[0]!.content as { type: string; text: string };
+    expect(text.text).toContain("vault://overview");
+  });
+
+  it("getPrompt instructions make clear the server does not generate prose", async () => {
+    const result = await client.getPrompt({ name: "rebuild-overview" });
+    const text = result.messages[0]!.content as { type: string; text: string };
+    expect(text.text).toContain("server does NOT generate prose");
+  });
+
+  it("prompt returns a single user-role message", async () => {
+    const result = await client.getPrompt({ name: "rebuild-overview" });
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]!.role).toBe("user");
+  });
+});
+
 // ── system tool ───────────────────────────────────────────────────
 
 describe("system tool", () => {
@@ -844,5 +891,146 @@ describe("system tool — indexer health fields", () => {
 
     expect(parsed.result.vaultRoot).toBeUndefined();
     expect(JSON.stringify(parsed.result)).not.toContain(indexerTmpDir);
+  });
+});
+
+// ── system tool — overview actions (contract-first TDD) ───────────
+
+describe("MCP Server — system tool — overview actions", () => {
+  it("overview_status returns missing when no overview file exists", async () => {
+    const result = await client.callTool({
+      name: "system",
+      arguments: { action: "overview_status" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { status: string; managed_by: string | null; updated_at: string | null };
+    };
+
+    expect(parsed.result.status).toBe("missing");
+    expect(parsed.result.managed_by).toBeNull();
+    expect(parsed.result.updated_at).toBeNull();
+  });
+
+  it("overview_status returns present with frontmatter metadata when overview file exists", async () => {
+    // Write a schema v3 overview file first
+    const overviewContent = [
+      "---",
+      "schema_version: 3",
+      "vault_scope: 'test vault'",
+      "updated_at: '2024-01-01T00:00:00.000Z'",
+      "managed_by: host",
+      "---",
+      "",
+      "# Vault Overview",
+      "",
+      "This is a test vault.",
+    ].join("\n");
+    await fs.mkdir(path.join(tmpDir, "meta"), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, "meta/overview.md"), overviewContent);
+
+    const result = await client.callTool({
+      name: "system",
+      arguments: { action: "overview_status" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { status: string; managed_by: string | null; updated_at: string | null };
+    };
+
+    expect(parsed.result.status).toBe("present");
+    expect(parsed.result.managed_by).toBe("host");
+    expect(parsed.result.updated_at).toBe("2024-01-01T00:00:00.000Z");
+  });
+
+  it("prepare_overview returns structural vault data without writing any files", async () => {
+    const filesBefore = await fs.readdir(tmpDir, { recursive: true });
+
+    const result = await client.callTool({
+      name: "system",
+      arguments: { action: "prepare_overview" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: {
+        fileCount: number;
+        directories: string[];
+        tags: string[];
+        recentTitles: string[];
+      };
+    };
+
+    // Verify structural data is returned
+    expect(typeof parsed.result.fileCount).toBe("number");
+    expect(parsed.result.fileCount).toBeGreaterThan(0);
+    expect(Array.isArray(parsed.result.directories)).toBe(true);
+    expect(Array.isArray(parsed.result.tags)).toBe(true);
+    expect(Array.isArray(parsed.result.recentTitles)).toBe(true);
+
+    // Verify no new files were written
+    const filesAfter = await fs.readdir(tmpDir, { recursive: true });
+    expect(filesAfter.length).toBe(filesBefore.length);
+  });
+
+  it("prepare_overview includes known directories from seeded vault", async () => {
+    const result = await client.callTool({
+      name: "system",
+      arguments: { action: "prepare_overview" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { fileCount: number; directories: string[]; tags: string[]; recentTitles: string[] };
+    };
+
+    // The seeded vault has hello.md and daily/2024-01-01.md
+    expect(parsed.result.fileCount).toBe(2);
+    expect(parsed.result.directories).toContain("daily");
+  });
+
+  it("save_overview writes overview to meta/overview.md with schema_version:3 frontmatter", async () => {
+    const overviewText = "This vault contains notes about MCP and markdown tooling.";
+    const scopeText = "MCP server architecture and markdown tooling notes.";
+
+    const result = await client.callTool({
+      name: "system",
+      arguments: { action: "save_overview", overview: overviewText, scope: scopeText },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { saved: boolean; path: string };
+    };
+
+    expect(parsed.result.saved).toBe(true);
+    expect(parsed.result.path).toBe("meta/overview.md");
+
+    // Verify the file was actually written
+    const written = await fs.readFile(path.join(tmpDir, "meta/overview.md"), "utf-8");
+    expect(written).toContain("schema_version: 3");
+    expect(written).toContain("vault_scope: MCP server architecture and markdown tooling notes.");
+    expect(written).not.toContain("overview:");
+    expect(written).toContain(overviewText);
+  });
+
+  it("save_overview: after save, overview_status returns present", async () => {
+    const overviewText = "A vault for testing the save_overview action.";
+    const scopeText = "Testing scope.";
+
+    await client.callTool({
+      name: "system",
+      arguments: { action: "save_overview", overview: overviewText, scope: scopeText },
+    });
+
+    const statusResult = await client.callTool({
+      name: "system",
+      arguments: { action: "overview_status" },
+    });
+    const content = statusResult.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { status: string; managed_by: string | null; updated_at: string | null };
+    };
+
+    expect(parsed.result.status).toBe("present");
+    expect(parsed.result.managed_by).toBe("host");
+    expect(parsed.result.updated_at).not.toBeNull();
   });
 });

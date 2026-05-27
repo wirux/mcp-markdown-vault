@@ -33,251 +33,188 @@ async function makeTempVault() {
   return { adapter, vaultPath };
 }
 
-describe("OverviewManager", () => {
-  it("generate returns managed_by auto frontmatter", async () => {
+describe("OverviewManager — getStatus", () => {
+  it("returns missing when no overview file exists", async () => {
     const { adapter } = await makeTempVault();
     const manager = new OverviewManager({ fsAdapter: adapter });
 
-    const result = await manager.generate();
+    const status = await manager.getStatus();
 
-    expect(result).toContain("managed_by: auto");
-    expect(result).toMatch(/generated_at: '?2026-01-15T10:00:00\.000Z'?/);
+    expect(status.status).toBe("missing");
+    expect(status.managed_by).toBeNull();
+    expect(status.updated_at).toBeNull();
   });
 
-  it("includes directory listing with correct counts and tag frequencies", async () => {
+  it("returns present when overview file exists with frontmatter", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote(
-      "notes/a.md",
-      "---\ntags:\n  - alpha\n  - beta\n---\n# Alpha\n",
+      "meta/overview.md",
+      '---\nschema_version: 3\nvault_scope: ""\nupdated_at: \'2026-01-15T10:00:00.000Z\'\nmanaged_by: host\n---\n\n# Vault Overview\n',
     );
-    await adapter.writeNote(
-      "notes/b.md",
-      "---\ntags: alpha, gamma\n---\n# Beta\n",
-    );
-    await adapter.writeNote(
-      "projects/c.md",
-      "---\ntags:\n  - beta\n---\n# Project C\n",
-    );
-
     const manager = new OverviewManager({ fsAdapter: adapter });
-    const result = await manager.generate();
 
-    expect(result).toContain("- **Total files**: 3");
-    expect(result).toContain("- **Directories**: 2");
-    expect(result).toContain("- `notes/` — 2 files");
-    expect(result).toContain("- `projects/` — 1 files");
-    expect(result).toContain("- `alpha` (2)");
-    expect(result).toContain("- `beta` (2)");
-    expect(result).toContain("- `gamma` (1)");
+    const status = await manager.getStatus();
+
+    expect(status.status).toBe("present");
+    expect(status.managed_by).toBe("host");
+    expect(status.updated_at).toBe("2026-01-15T10:00:00.000Z");
   });
 
-  it("excludes meta directory from counts and scans", async () => {
+  it("returns present when overview file has non-empty vault_scope field", async () => {
+    const { adapter } = await makeTempVault();
+    await adapter.writeNote(
+      "meta/overview.md",
+      "---\nschema_version: 3\nvault_scope: A research vault.\nupdated_at: '2026-01-15T10:00:00.000Z'\nmanaged_by: host\n---\n\n# Vault Overview\n\nA research vault.\n",
+    );
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    const status = await manager.getStatus();
+
+    expect(status.status).toBe("present");
+    expect(status.managed_by).toBe("host");
+    expect(status.updated_at).toBe("2026-01-15T10:00:00.000Z");
+  });
+});
+
+describe("OverviewManager — readOverview", () => {
+  it("returns null when no overview file exists", async () => {
+    const { adapter } = await makeTempVault();
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    const result = await manager.readOverview();
+
+    expect(result).toBeNull();
+  });
+
+  it("returns file content when overview exists", async () => {
+    const { adapter } = await makeTempVault();
+    const content = "---\nschema_version: 3\nvault_scope: test\nupdated_at: '2026-01-15T10:00:00.000Z'\nmanaged_by: host\n---\n\n# Vault Overview\n\ntest\n";
+    await adapter.writeNote("meta/overview.md", content);
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    const result = await manager.readOverview();
+
+    expect(result).toBe(content);
+  });
+});
+
+describe("OverviewManager — saveOverview", () => {
+  it("writes schema_version:3 frontmatter with dedicated scope and managed_by:host", async () => {
+    const { adapter } = await makeTempVault();
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    await manager.saveOverview(
+      "A research vault about distributed systems.",
+      "Distributed systems design decisions and architecture notes.",
+    );
+
+    const content = await adapter.readNote("meta/overview.md");
+    expect(content).toContain("schema_version: 3");
+    expect(content).toContain("vault_scope: Distributed systems design decisions and architecture notes.");
+    expect(content).toContain("managed_by: host");
+    expect(content).toContain("updated_at: '2026-01-15T10:00:00.000Z'");
+    expect(content).toContain("A research vault about distributed systems.");
+  });
+
+  it("caps vault_scope at 200 chars regardless of input length", async () => {
+    const { adapter } = await makeTempVault();
+    const manager = new OverviewManager({ fsAdapter: adapter });
+    const longScope = "A ".repeat(150).trim();
+
+    await manager.saveOverview("Full overview body.", longScope);
+
+    const content = await adapter.readNote("meta/overview.md");
+    const frontmatter = content.slice(0, content.indexOf("\n---\n", 4));
+    const scopeLine = frontmatter.split("\n").find((line) => line.startsWith("vault_scope:"));
+    expect(scopeLine).toBeDefined();
+    // YAML quoting adds some chars but the actual value is capped at 200
+    const rawValue = content.match(/vault_scope:\s*'?([^'\n]+)/)?.[1] ?? "";
+    expect(rawValue.length).toBeLessThanOrEqual(200);
+    expect(content).toContain("Full overview body.");
+  });
+
+  it("does not include evidence_hash, vault_context, or generation_source", async () => {
+    const { adapter } = await makeTempVault();
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    await manager.saveOverview("A test vault.", "Test routing hint.");
+
+    const content = await adapter.readNote("meta/overview.md");
+    expect(content).not.toContain("evidence_hash");
+    expect(content).not.toContain("vault_context");
+    expect(content).not.toContain("generation_source");
+  });
+
+  it("overwrites existing overview file", async () => {
+    const { adapter } = await makeTempVault();
+    await adapter.writeNote(
+      "meta/overview.md",
+      "---\nschema_version: 2\nmanaged_by: auto\n---\n\n# Old Overview\n",
+    );
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    await manager.saveOverview("New overview text.", "New scope.");
+
+    const content = await adapter.readNote("meta/overview.md");
+    expect(content).toContain("schema_version: 3");
+    expect(content).toContain("New overview text.");
+    expect(content).not.toContain("schema_version: 2");
+    expect(content).not.toContain("managed_by: auto");
+  });
+
+  it("after save, getStatus returns present", async () => {
+    const { adapter } = await makeTempVault();
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    await manager.saveOverview("A vault for testing.", "Testing scope.");
+
+    const status = await manager.getStatus();
+    expect(status.status).toBe("present");
+    expect(status.managed_by).toBe("host");
+  });
+});
+
+describe("OverviewManager — gatherEvidence", () => {
+  it("returns fileCount, directories, tags, recentTitles", async () => {
+    const { adapter } = await makeTempVault();
+    await adapter.writeNote("notes/a.md", "---\ntags:\n  - alpha\n---\n# Alpha\n");
+    await adapter.writeNote("notes/b.md", "---\ntags:\n  - beta\n---\n# Beta\n");
+    await adapter.writeNote("projects/c.md", "---\ntags:\n  - alpha\n---\n# Project C\n");
+    const manager = new OverviewManager({ fsAdapter: adapter });
+
+    const evidence = await manager.gatherEvidence();
+
+    expect(evidence.fileCount).toBe(3);
+    expect(evidence.directories).toContain("notes");
+    expect(evidence.directories).toContain("projects");
+    expect(evidence.tags).toContain("alpha");
+    expect(evidence.tags).toContain("beta");
+    expect(Array.isArray(evidence.recentTitles)).toBe(true);
+  });
+
+  it("excludes meta directory from evidence", async () => {
     const { adapter } = await makeTempVault();
     await adapter.writeNote("notes/a.md", "---\ntags: visible\n---\n# Visible\n");
     await adapter.writeNote("meta/overview.md", "---\ntags: hidden\n---\n# Hidden\n");
-
-    const manager = new OverviewManager({ fsAdapter: adapter });
-    const result = await manager.generate();
-
-    expect(result).toContain("- **Total files**: 1");
-    expect(result).toContain("- **Directories**: 1");
-    expect(result).toContain("- `notes/` — 1 files");
-    expect(result).toContain("- `visible` (1)");
-    expect(result).not.toContain("hidden");
-    expect(result).not.toContain("meta/");
-  });
-
-  it("returns deterministic structure for repeated calls", async () => {
-    const { adapter } = await makeTempVault();
-    await adapter.writeNote("b.md", "# Bee\n");
-    await adapter.writeNote("a.md", "# Aye\n");
     const manager = new OverviewManager({ fsAdapter: adapter });
 
-    const first = await manager.generate();
-    const second = await manager.generate();
+    const evidence = await manager.gatherEvidence();
 
-    expect(second).toBe(first);
-    expect(first).toContain("- Aye");
-    expect(first).toContain("- Bee");
+    expect(evidence.fileCount).toBe(1);
+    expect(evidence.directories).not.toContain("meta");
+    expect(evidence.tags).not.toContain("hidden");
   });
 
-  it("writes overview to meta overview file", async () => {
+  it("does not write any files", async () => {
     const { adapter, vaultPath } = await makeTempVault();
-    await adapter.writeNote("notes/a.md", "# Written\n");
-    const manager = new OverviewManager({ fsAdapter: adapter });
-
-    await manager.writeOverview();
-
-    const [{ readFile }, path] = await Promise.all([
-      import(FS_PROMISES_MODULE),
-      import(PATH_MODULE),
-    ]);
-    const written = await readFile(path.join(vaultPath, "meta/overview.md"), "utf8");
-    expect(written).toContain("# Vault Overview");
-    expect(written).toContain("- Written");
-  });
-
-  it("overwrites existing meta/overview.md stub on subsequent writeOverview calls", async () => {
-    const { adapter } = await makeTempVault();
-    // Simulate auto-init creating the stub first
-    await adapter.writeNote(
-      "meta/overview.md",
-      "---\nschema_version: 1\nmanaged_by: auto\n---\n\n# Vault Overview\n\n<!-- stub -->\n",
-    );
-    // Add real content to the vault
-    await adapter.writeNote("docs/note.md", "---\ntags: testing\n---\n# My Note\n");
-
-    const manager = new OverviewManager({ fsAdapter: adapter });
-
-    // This must NOT throw NoteAlreadyExistsError — it must overwrite
-    await manager.writeOverview();
-
-    const content = await adapter.readNote("meta/overview.md");
-    expect(content).toContain("## Statistics");
-    expect(content).toContain("- **Total files**: 1");
-    expect(content).toContain("- `testing` (1)");
-    expect(content).toContain("- My Note");
-    expect(content).not.toContain("<!-- stub -->");
-  });
-
-  it("shouldRefresh uses default threshold of five", () => {
-    const manager = new OverviewManager({
-      fsAdapter: {
-        listNotes: async () => [],
-        readNote: async () => "",
-        writeNote: async () => undefined,
-        deleteNote: async () => undefined,
-        exists: async () => false,
-        stat: async () => ({ sizeBytes: 0, modifiedAt: "2026-01-15T10:00:00.000Z" }),
-      },
-    });
-
-    expect(manager.shouldRefresh(4)).toBe(false);
-    expect(manager.shouldRefresh(5)).toBe(true);
-  });
-
-  it("skips unreadable files while still collecting available data", async () => {
-    const { adapter } = await makeTempVault();
-    await adapter.writeNote("notes/a.md", "---\ntags: kept\n---\n# Kept\n");
-    await adapter.writeNote("notes/b.md", "---\ntags: missing\n---\n# Missing\n");
-
-    const manager = new OverviewManager({
-      fsAdapter: {
-        listNotes: adapter.listNotes.bind(adapter),
-        readNote: async (notePath: string) => {
-          if (notePath === "notes/b.md") {
-            throw new Error("boom");
-          }
-
-          return adapter.readNote(notePath);
-        },
-        writeNote: adapter.writeNote.bind(adapter),
-        deleteNote: adapter.deleteNote.bind(adapter),
-        exists: adapter.exists.bind(adapter),
-        stat: adapter.stat.bind(adapter),
-      },
-    });
-
-    const result = await manager.generate();
-
-    expect(result).toContain("- `kept` (1)");
-    expect(result).not.toContain("missing");
-    expect(result).toContain("- Kept");
-  });
-
-  it("uses deterministic fallback when no sampling provider is given", async () => {
-    const { adapter } = await makeTempVault();
-    for (let i = 0; i < 5; i++) {
-      await adapter.writeNote(`notes/note${i}.md`, `# Note ${i}\n`);
-    }
-    const manager = new OverviewManager({ fsAdapter: adapter });
-    const result = await manager.generate();
-    expect(result).toContain("generation_source: deterministic");
-    expect(result).toContain("vault_scope:");
-    expect(result).toContain("vault_context:");
-  });
-
-  it("uses sampling output when provider returns valid response", async () => {
-    const { adapter } = await makeTempVault();
-    for (let i = 0; i < 5; i++) {
-      await adapter.writeNote(`notes/note${i}.md`, `# Note ${i}\n`);
-    }
-    const mockProvider = {
-      isAvailable: () => true,
-      createMessage: async () => ({
-        text: JSON.stringify({
-          vault_scope: "Semantic scope from LLM",
-          vault_context: "Semantic context from LLM",
-        }),
-      }),
-    };
-    const manager = new OverviewManager({
-      fsAdapter: adapter,
-      getSamplingProvider: () => mockProvider,
-    });
-    const result = await manager.generate();
-    expect(result).toContain("generation_source: sampling");
-    expect(result).toContain("Semantic scope from LLM");
-    expect(result).toContain("Semantic context from LLM");
-  });
-
-  it("falls back to deterministic when sampling returns invalid JSON", async () => {
-    const { adapter } = await makeTempVault();
-    for (let i = 0; i < 5; i++) {
-      await adapter.writeNote(`notes/note${i}.md`, `# Note ${i}\n`);
-    }
-    const mockProvider = {
-      isAvailable: () => true,
-      createMessage: async () => ({ text: "not valid json" }),
-    };
-    const manager = new OverviewManager({
-      fsAdapter: adapter,
-      getSamplingProvider: () => mockProvider,
-    });
-    const result = await manager.generate();
-    expect(result).toContain("generation_source: deterministic");
-  });
-
-  it("skips sampling for small vault (fewer than 3 content files)", async () => {
-    const { adapter } = await makeTempVault();
     await adapter.writeNote("notes/a.md", "# A\n");
-    await adapter.writeNote("notes/b.md", "# B\n");
-    let samplingCalled = false;
-    const mockProvider = {
-      isAvailable: () => true,
-      createMessage: async () => {
-        samplingCalled = true;
-        return { text: JSON.stringify({ vault_scope: "s", vault_context: "c" }) };
-      },
-    };
-    const manager = new OverviewManager({
-      fsAdapter: adapter,
-      getSamplingProvider: () => mockProvider,
-    });
-    await manager.generate();
-    expect(samplingCalled).toBe(false);
-  });
-
-  it("skips regeneration when evidence hash is unchanged", async () => {
-    const { adapter } = await makeTempVault();
-    for (let i = 0; i < 5; i++) {
-      await adapter.writeNote(`notes/note${i}.md`, `# Note ${i}\n`);
-    }
     const manager = new OverviewManager({ fsAdapter: adapter });
-    await manager.writeOverview();
-    let samplingCalled = false;
-    const mockProvider = {
-      isAvailable: () => true,
-      createMessage: async () => {
-        samplingCalled = true;
-        return { text: JSON.stringify({ vault_scope: "s", vault_context: "c" }) };
-      },
-    };
-    const manager2 = new OverviewManager({
-      fsAdapter: adapter,
-      getSamplingProvider: () => mockProvider,
-    });
-    await manager2.generate();
-    expect(samplingCalled).toBe(false);
+
+    const { readdir } = await import(FS_PROMISES_MODULE);
+    const before = await readdir(vaultPath, { recursive: true });
+    await manager.gatherEvidence();
+    const after = await readdir(vaultPath, { recursive: true });
+
+    expect(after.length).toBe(before.length);
   });
 });

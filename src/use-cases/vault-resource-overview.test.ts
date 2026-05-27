@@ -71,11 +71,16 @@ describe("VaultOverviewResourceComposer", () => {
     expect(result).toContain("Actual content here.");
   });
 
-  it("omits overview section when overview.md missing", async () => {
+  it("omits overview file body when overview.md missing", async () => {
     const { adapter } = await makeTempVault();
     const composer = makeComposer(adapter);
     const result = await composer.compose();
-    expect(result.split("\n\n").length).toBeLessThanOrEqual(3);
+    expect(result).toContain("# Vault Overview");
+    expect(result).toContain("## Agent Orientation");
+    expect(result).toContain("## Quick Stats");
+    const sections = result.split("\n\n");
+    const hasOverviewBody = sections.some((s) => s.startsWith("# Overview") || s.includes("meta/overview.md"));
+    expect(hasOverviewBody).toBe(false);
   });
 
   it("omits overview section when overview.md body is only frontmatter and comments", async () => {

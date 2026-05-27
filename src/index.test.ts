@@ -214,10 +214,10 @@ describe("parseVaultContextConfig integration", () => {
     delete process.env["VAULT_CONTEXT_MODE"];
   });
 
-  it("defaults to auto mode when VAULT_CONTEXT_MODE is unset", async () => {
+  it("defaults to assisted mode when VAULT_CONTEXT_MODE is unset", async () => {
     const { parseVaultContextConfig } = await import("./use-cases/vault-context-config.js");
     const config = parseVaultContextConfig({});
-    expect(config.mode).toBe("auto");
+    expect(config.mode).toBe("assisted");
   });
 
   it("accepts manual mode", async () => {

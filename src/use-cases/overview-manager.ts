@@ -1,11 +1,23 @@
 import yaml from "js-yaml";
 import type { IFileSystemAdapter } from "../domain/interfaces/file-system-adapter.js";
-import type { ISamplingProvider } from "../domain/interfaces/sampling-provider.js";
-import { generateVaultScope } from "./vault-scope.js";
-import { computeEvidenceHash, extractStoredHash } from "./evidence-hash.js";
-import type { VaultEvidence } from "./evidence-hash.js";
-import { buildSamplingPrompt, parseSamplingResponse, SAMPLING_TIMEOUT_MS } from "./sampling-prompt.js";
-import { MAX_CONTEXT_CHARS } from "./sampling-prompt.js";
+import { MAX_SCOPE_CHARS } from "./vault-scope.js";
+
+const MAX_DIRECTORIES = 10;
+const MAX_TAGS = 20;
+const MAX_TITLES = 10;
+
+export interface OverviewStatus {
+  status: "missing" | "present";
+  managed_by: string | null;
+  updated_at: string | null;
+}
+
+export interface VaultEvidence {
+  fileCount: number;
+  directories: string[];
+  tags: string[];
+  recentTitles: string[];
+}
 
 interface DirectorySummary {
   name: string;
@@ -17,168 +29,85 @@ interface TagSummary {
   count: number;
 }
 
-const DEFAULT_THRESHOLD = 5;
-const MAX_DIRECTORIES = 10;
-const MAX_TAGS = 20;
-const MAX_TITLES = 10;
-const MIN_FILES_FOR_SAMPLING = 3;
-
 export class OverviewManager {
   private readonly fsAdapter: IFileSystemAdapter;
-  private readonly threshold: number;
-  private readonly getSamplingProvider: (() => ISamplingProvider | null) | undefined;
-  private isGenerating = false;
 
-  constructor(deps: {
-    fsAdapter: IFileSystemAdapter;
-    threshold?: number;
-    getSamplingProvider?: () => ISamplingProvider | null;
-  }) {
+  constructor(deps: { fsAdapter: IFileSystemAdapter }) {
     this.fsAdapter = deps.fsAdapter;
-    this.threshold = deps.threshold ?? DEFAULT_THRESHOLD;
-    this.getSamplingProvider = deps.getSamplingProvider;
   }
 
-  async generate(): Promise<string> {
-    const timestamp = new Date().toISOString();
-    const notePaths = await this.fsAdapter.listNotes();
-    const nonMetaNotePaths = notePaths.filter((p) => !p.startsWith("meta/"));
-
-    const topDirectories = this.collectTopDirectories(nonMetaNotePaths);
-    const tags = await this.collectTags(nonMetaNotePaths);
-    const recentTitles = await this.collectRecentTitles(nonMetaNotePaths);
-    const directoryCount = new Set(
-      nonMetaNotePaths
-        .map((p) => getTopLevelDirectory(p))
-        .filter((d): d is string => d !== undefined),
-    ).size;
-
-    const evidence: VaultEvidence = {
-      totalFiles: nonMetaNotePaths.length,
-      directories: topDirectories.map((d) => d.name),
-      tags: tags.map((t) => t.name),
-      titles: recentTitles,
-    };
-
-    const currentHash = computeEvidenceHash(evidence);
-
-    let storedHash: string | undefined;
+  async getStatus(): Promise<OverviewStatus> {
+    let content: string;
     try {
-      const existing = await this.fsAdapter.readNote("meta/overview.md");
-      storedHash = extractStoredHash(existing);
+      content = await this.fsAdapter.readNote("meta/overview.md");
     } catch {
-      storedHash = undefined;
+      return { status: "missing", managed_by: null, updated_at: null };
     }
 
-    if (storedHash === currentHash) {
-      const existing = await this.fsAdapter.readNote("meta/overview.md");
-      return existing;
+    const frontmatter = parseFrontmatter(content);
+    if (frontmatter === null) {
+      return { status: "present", managed_by: null, updated_at: null };
     }
 
-    let vaultScope: string;
-    let vaultContext: string;
-    let generationSource: "sampling" | "deterministic" = "deterministic";
+    const managed_by = typeof frontmatter["managed_by"] === "string" ? frontmatter["managed_by"] : null;
+    const updated_at = typeof frontmatter["updated_at"] === "string" ? frontmatter["updated_at"] : null;
 
-    const deterministicScope = generateVaultScope({
-      totalFiles: nonMetaNotePaths.length,
-      directories: topDirectories,
-      tags,
-    });
-    const deterministicContext = buildDeterministicContext(evidence);
+    return {
+      status: "present",
+      managed_by,
+      updated_at,
+    };
+  }
 
-    if (
-      nonMetaNotePaths.length >= MIN_FILES_FOR_SAMPLING &&
-      this.getSamplingProvider !== undefined
-    ) {
-      const provider = this.getSamplingProvider();
-      if (provider !== null && provider.isAvailable()) {
-        try {
-          const request = buildSamplingPrompt(evidence);
-          const responsePromise = provider.createMessage(request);
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("sampling timeout")), SAMPLING_TIMEOUT_MS),
-          );
-          const response = await Promise.race([responsePromise, timeoutPromise]);
-          const parsed = parseSamplingResponse(response);
-          if (parsed.ok) {
-            vaultScope = parsed.vault_scope;
-            vaultContext = parsed.vault_context;
-            generationSource = "sampling";
-          } else {
-            vaultScope = deterministicScope;
-            vaultContext = deterministicContext;
-          }
-        } catch {
-          vaultScope = deterministicScope;
-          vaultContext = deterministicContext;
-        }
-      } else {
-        vaultScope = deterministicScope;
-        vaultContext = deterministicContext;
-      }
-    } else {
-      vaultScope = deterministicScope;
-      vaultContext = deterministicContext;
+  async readOverview(): Promise<string | null> {
+    try {
+      return await this.fsAdapter.readNote("meta/overview.md");
+    } catch {
+      return null;
     }
+  }
 
+  async saveOverview(text: string, scope: string): Promise<void> {
+    const timestamp = new Date().toISOString();
+    const trimmedScope = scope.replace(/\s+/g, " ").trim().slice(0, MAX_SCOPE_CHARS);
     const frontmatter = yaml.dump({
-      schema_version: 2,
-      generated_by: "mcp-markdown-vault",
-      generated_at: timestamp,
-      managed_by: "auto",
-      generation_source: generationSource,
-      evidence_hash: currentHash,
-      vault_scope: vaultScope,
-      vault_context: vaultContext,
+      schema_version: 3,
+      vault_scope: trimmedScope,
+      updated_at: timestamp,
+      managed_by: "host",
     });
 
-    return [
+    const content = [
       "---",
       frontmatter.trimEnd(),
       "---",
       "",
       "# Vault Overview",
       "",
-      "## About This Vault",
-      "",
-      vaultContext,
-      "",
-      "## Statistics",
-      "",
-      `- **Total files**: ${nonMetaNotePaths.length}`,
-      `- **Directories**: ${directoryCount}`,
-      "",
-      "## Top Directories",
-      "",
-      ...formatDirectorySection(topDirectories),
-      "",
-      "## Common Tags",
-      "",
-      ...formatTagSection(tags),
-      "",
-      "## Recent Note Titles",
-      "",
-      ...formatTitleSection(recentTitles),
+      text,
       "",
     ].join("\n");
+
+    await this.fsAdapter.writeNote("meta/overview.md", content, true);
   }
 
-  async writeOverview(): Promise<void> {
-    if (this.isGenerating) return;
-    this.isGenerating = true;
-    try {
-      const content = await this.generate();
-      await this.fsAdapter.writeNote("meta/overview.md", content, true);
-    } finally {
-      this.isGenerating = false;
-    }
+  async gatherEvidence(): Promise<VaultEvidence> {
+    const notePaths = await this.fsAdapter.listNotes();
+    const nonMetaNotePaths = notePaths.filter((p) => !p.startsWith("meta/"));
+
+    const topDirectories = this.collectTopDirectories(nonMetaNotePaths);
+    const tags = await this.collectTags(nonMetaNotePaths);
+    const recentTitles = await this.collectRecentTitles(nonMetaNotePaths);
+
+    return {
+      fileCount: nonMetaNotePaths.length,
+      directories: topDirectories.map((d) => d.name),
+      tags: tags.map((t) => t.name),
+      recentTitles,
+    };
   }
 
-  shouldRefresh(changeCount: number): boolean {
-    return changeCount >= this.threshold;
-  }
-
-  private collectTopDirectories(notePaths: string[]): DirectorySummary[] {
+  collectTopDirectories(notePaths: string[]): DirectorySummary[] {
     const directoryCounts = new Map<string, number>();
 
     for (const notePath of notePaths) {
@@ -196,7 +125,7 @@ export class OverviewManager {
       .map(([name, fileCount]) => ({ name, fileCount }));
   }
 
-  private async collectTags(notePaths: string[]): Promise<TagSummary[]> {
+  async collectTags(notePaths: string[]): Promise<TagSummary[]> {
     const tagCounts = new Map<string, number>();
 
     for (const notePath of notePaths) {
@@ -216,7 +145,7 @@ export class OverviewManager {
       .map(([name, count]) => ({ name, count }));
   }
 
-  private async collectRecentTitles(notePaths: string[]): Promise<string[]> {
+  async collectRecentTitles(notePaths: string[]): Promise<string[]> {
     const sortedPaths = [...notePaths].sort((left, right) => left.localeCompare(right)).slice(0, MAX_TITLES);
     const titles: string[] = [];
 
@@ -244,15 +173,38 @@ export class OverviewManager {
   }
 }
 
-function buildDeterministicContext(evidence: VaultEvidence): string {
-  const topDirs = evidence.directories.slice(0, 3).join(", ");
-  const topTags = evidence.tags.slice(0, 5).join(", ");
-  const parts: string[] = [`Vault with ${evidence.totalFiles} files`];
-  if (topDirs.length > 0) parts.push(`across ${topDirs}`);
-  const base = parts.join(" ") + ".";
-  const tagPart = topTags.length > 0 ? ` Main topics: ${topTags}.` : "";
-  const full = base + tagPart;
-  return full.length <= MAX_CONTEXT_CHARS ? full : full.slice(0, MAX_CONTEXT_CHARS - 1) + "\u2026";
+function parseFrontmatter(content: string): Record<string, unknown> | null {
+  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
+    return null;
+  }
+
+  const closingIndex = content.indexOf("\n---\n", 4);
+  const closingIndexAlt = content.indexOf("\n---\r\n", 4);
+  const endIdx =
+    closingIndex !== -1
+      ? closingIndex
+      : closingIndexAlt !== -1
+        ? closingIndexAlt
+        : -1;
+
+  if (endIdx === -1) {
+    return null;
+  }
+
+  const frontmatterRaw = content.slice(4, endIdx);
+
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(frontmatterRaw);
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    return null;
+  }
+
+  return parsed as Record<string, unknown>;
 }
 
 function getTopLevelDirectory(notePath: string): string | undefined {
@@ -265,7 +217,7 @@ function getTopLevelDirectory(notePath: string): string | undefined {
 }
 
 function extractTags(content: string): string[] {
-  const frontmatter = extractFrontmatter(content);
+  const frontmatter = extractFrontmatterRaw(content);
   if (frontmatter === undefined) {
     return [];
   }
@@ -297,7 +249,7 @@ function normalizeTags(rawTags: unknown): string[] {
   return [];
 }
 
-function extractFrontmatter(content: string): string | undefined {
+function extractFrontmatterRaw(content: string): string | undefined {
   if (!content.startsWith("---\n")) {
     return undefined;
   }
@@ -320,28 +272,4 @@ function extractFirstH1(content: string): string | undefined {
   }
 
   return undefined;
-}
-
-function formatDirectorySection(directories: DirectorySummary[]): string[] {
-  if (directories.length === 0) {
-    return ["- None"];
-  }
-
-  return directories.map((directory) => `- \`${directory.name}/\` — ${directory.fileCount} files`);
-}
-
-function formatTagSection(tags: TagSummary[]): string[] {
-  if (tags.length === 0) {
-    return ["- None"];
-  }
-
-  return tags.map((tag) => `- \`${tag.name}\` (${tag.count})`);
-}
-
-function formatTitleSection(titles: string[]): string[] {
-  if (titles.length === 0) {
-    return ["- None"];
-  }
-
-  return titles.map((title) => `- ${title}`);
 }

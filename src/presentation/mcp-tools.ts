@@ -28,6 +28,7 @@ import { MarkdownFileRepository } from "../infrastructure/markdown-file-reposito
 import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
 import { DomainError, InvalidArgumentError } from "../domain/errors/index.js";
+import { OverviewManager } from "../use-cases/overview-manager.js";
 import { VaultStatsComposer } from "../use-cases/vault-stats.js";
 import { VaultOverviewResourceComposer } from "../use-cases/vault-resource-overview.js";
 
@@ -92,14 +93,17 @@ export function createMcpServer(deps: McpDependencies): McpServer {
     },
   );
 
-  let firstViewCall = true;
+  let firstToolCall = true;
+  const getVaultScope = deps.getVaultScope ?? (() => "general markdown notes vault");
+  const vaultScope = getVaultScope();
+  const vaultOrientationHint = "Read vault://overview resource for full vault context, search strategy, workflow guidance, and conventions.";
 
   // ── vault tool ──────────────────────────────────────────────────
 
   server.registerTool("vault", {
     title: "Vault",
     description:
-      "Manage vault notes: list, read, create, update, delete, stat, create_from_template. Operates on .md files in the markdown vault.",
+      `Manage vault notes. Vault scope: ${vaultScope}. Actions: list (browse notes), read (full note), create/update/delete (whole-file writes), stat (metadata), create_from_template (scaffold from template). For search strategy and conventions, read vault://overview.`,
     inputSchema: {
       action: z.enum(["list", "read", "create", "update", "delete", "stat", "create_from_template"]),
       path: z.string().optional(),
@@ -109,7 +113,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       variables: z.record(z.string(), z.string()).optional().describe("Key-value variables to inject into template placeholders (for create_from_template)."),
     },
   }, async ({ action, path, directory, content, templatePath, variables }) => {
-    return wrapTool(deps.workflow, "vault", async () => {
+    return wrapTool(deps.workflow, "vault", takePrimingContext(), async () => {
       switch (action) {
         case "list": {
           const notes = await deps.fsAdapter.listNotes(directory);
@@ -176,7 +180,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("edit", {
     title: "Edit",
     description:
-      "Edit notes. Single mode: provide path, operation, content. Batch mode: provide operations array (max 50, sequential, stops on first error). AST ops (append/prepend/replace) target headings or block IDs with fuzzy matching. Freeform ops (line_replace/string_replace) for line range or literal string. frontmatter_set merges YAML. dryRun=true previews as unified diff without writing.",
+      `Edit notes safely. Vault scope: ${vaultScope}. Supports AST edits by heading/block ID, freeform line/string replacement, frontmatter_set metadata merges, batch operations (max 50), and dryRun=true unified diff previews. Read vault://overview for editing strategy and conventions.`,
     inputSchema: {
       path: z.string().optional().describe("Note path (required for single edit)."),
       operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]).optional().describe("Edit operation (required for single edit)."),
@@ -203,7 +207,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       })).optional().describe("For batch mode: array of edit operations (max 50). Executed sequentially, stops on first error."),
     },
   }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun, operations }) => {
-    return wrapTool(deps.workflow, "edit", async () => {
+    return wrapTool(deps.workflow, "edit", takePrimingContext(), async () => {
       // Helper: update indexes after file write
       // Backlinks synchronously (required for consistency), vectors in background
       const syncIndexes = async (filePath: string): Promise<void> => {
@@ -367,7 +371,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("view", {
     title: "View",
     description:
-      `Read and search markdown notes. Vault scope: ${(deps.getVaultScope ?? (() => "general markdown notes vault"))()}.\nActions: search (heading-aware fragment retrieval with TF-IDF + proximity), semantic_search (vector + lexical hybrid for conceptual queries), global_search (cross-vault exact-match grep), outline (file or directory structure tree), read (full file or single section by heading), frontmatter_get (parse YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).`,
+      `Read and search markdown notes. Vault scope: ${vaultScope}.\nActions: search (heading-aware fragment retrieval with TF-IDF + proximity), semantic_search (vector + lexical hybrid for conceptual queries), global_search (cross-vault exact-match grep), outline (file or directory structure tree), read (full file or single section by heading), frontmatter_get (parse YAML frontmatter), bulk_read (read multiple files/headings in one call), backlinks (find all notes linking to a given path).`,
     inputSchema: {
       action: z.enum(["search", "global_search", "semantic_search", "outline", "read", "frontmatter_get", "bulk_read", "backlinks"]),
       path: z.string().optional(),
@@ -383,10 +387,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       })).optional().describe("For bulk_read: array of files to read, each with optional heading to extract."),
     },
   }, async ({ action, path: notePath, query, maxChunks, heading, headingDepth, directory, items }) => {
-    return wrapTool(deps.workflow, "view", async () => {
-      const isPriming = firstViewCall;
-      if (firstViewCall) firstViewCall = false;
-
+    return wrapTool(deps.workflow, "view", takePrimingContext(), async () => {
       const actionResult = await (async () => {
         switch (action) {
         case "search": {
@@ -483,17 +484,6 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         }
       })();
 
-      if (isPriming) {
-        return Object.assign({}, actionResult as object, {
-          _meta: {
-            vault_orientation: {
-              scope: (deps.getVaultScope ?? (() => "general markdown notes vault"))(),
-              hint: "Read vault://overview resource for full vault context and conventions.",
-            },
-          },
-        });
-      }
-
       return actionResult;
     });
   });
@@ -503,13 +493,13 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("workflow", {
     title: "Workflow",
     description:
-      "Manage agent workflow state: check status, fire transitions, view history, or reset. Based on a Petri net state machine.",
+      `Manage optional agent workflow state for this vault (${vaultScope}): status, transition, history, reset. Typical flow: search → open_note → save → done; read vault://overview for usage guidance.`,
     inputSchema: {
       action: z.enum(["status", "transition", "history", "reset"]),
       transition: z.string().optional(),
     },
   }, async ({ action, transition }) => {
-    return wrapTool(deps.workflow, "workflow", async () => {
+    return wrapTool(deps.workflow, "workflow", takePrimingContext(), async () => {
       switch (action) {
         case "status": {
           return {
@@ -545,13 +535,15 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("system", {
     title: "System",
     description:
-      "System administration: check status, get indexing info, vault structure overview, and manage the server.",
+      `System administration for this vault (${vaultScope}). Actions: status (indexing/backlinks/workflow health), reindex (async rebuild), overview (folder tree), overview_status (meta/overview.md state), prepare_overview (gather evidence), save_overview (persist host-written overview).`,
     inputSchema: {
-      action: z.enum(["status", "reindex", "overview"]),
+      action: z.enum(["status", "reindex", "overview", "overview_status", "prepare_overview", "save_overview"]),
       maxDepth: z.number().optional().describe("Maximum folder depth for overview (default 3)."),
+      overview: z.string().optional().describe("Overview text to save (required for save_overview action)."),
+      scope: z.string().optional().describe("One-line vault routing hint, max 200 chars (required for save_overview action). Should describe what information agents can find here."),
     },
-  }, async ({ action, maxDepth }) => {
-    return wrapTool(deps.workflow, "system", async () => {
+  }, async ({ action, maxDepth, overview, scope }) => {
+    return wrapTool(deps.workflow, "system", takePrimingContext(), async () => {
       switch (action) {
         case "status": {
           const base = {
@@ -573,7 +565,6 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         }
         case "reindex": {
           if (deps.indexer) {
-            // Run re-indexing asynchronously (don't block the response)
             deps.indexer.indexAll()
               .then(async () => {
                 if (deps.backlinkIndex) {
@@ -597,27 +588,110 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           const overviewService = new VaultOverviewService(deps.fsAdapter);
           return overviewService.getOverview(maxDepth);
         }
+        case "overview_status": {
+          const manager = new OverviewManager({ fsAdapter: deps.fsAdapter });
+          return manager.getStatus();
+        }
+        case "prepare_overview": {
+          const manager = new OverviewManager({ fsAdapter: deps.fsAdapter });
+          return manager.gatherEvidence();
+        }
+        case "save_overview": {
+          if (typeof overview !== "string" || overview.trim().length === 0) {
+            throw new InvalidArgumentError("overview");
+          }
+          if (typeof scope !== "string" || scope.trim().length === 0) {
+            throw new InvalidArgumentError("scope");
+          }
+          const manager = new OverviewManager({ fsAdapter: deps.fsAdapter });
+          await manager.saveOverview(overview.trim(), scope.trim());
+          return { saved: true, path: "meta/overview.md" };
+        }
         default:
           throw new InvalidArgumentError("action");
       }
     });
   });
 
+  // ── rebuild-overview prompt ──────────────────────────────────────
+
+  server.registerPrompt(
+    "rebuild-overview",
+    {
+      title: "Rebuild Vault Overview",
+      description:
+        "Guides the host LLM through the assisted overview flow: gather evidence, generate prose, save, and verify.",
+    },
+    () => ({
+      description:
+        "Rebuild the markdown vault overview using the assisted overview flow.",
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: [
+              "Rebuild the markdown vault overview using the assisted overview flow.",
+              "",
+              "Follow these steps exactly:",
+              "",
+              '1. Call the `system` tool with `{ "action": "prepare_overview" }` to gather structural evidence (file count, directories, tags, recent titles).',
+              "",
+              "2. Using the returned evidence, generate TWO separate pieces of text:",
+              "",
+              "   a) **scope** (max 200 chars): A one-line routing hint that tells other agents what information they can find in this MCP server. Focus on WHAT the vault offers — topics, domains, purpose — not structural facts like file counts or folder names. Example: \"Design decisions, architecture notes, and implementation logs for the MCP markdown vault project.\"",
+              "",
+              "   b) **overview** (3-8 sentences): A fuller semantic description covering the vault's contents, key topic areas, organizational structure, and how agents should use it.",
+              "",
+              "   Do NOT call an external LLM — generate both texts yourself as the host model.",
+              "",
+              '3. Call the `system` tool with `{ "action": "save_overview", "overview": "<your overview text>", "scope": "<your scope text>" }` to persist both to `meta/overview.md`.',
+              "",
+              "4. Read the `vault://overview` resource to verify the saved context, and summarize what changed.",
+              "",
+              "Important constraints:",
+              "- The server does NOT generate prose — you (the host LLM) are responsible for writing both the scope and the overview.",
+              "- Do not write to `meta/overview.md` directly; always use `save_overview` so the server manages frontmatter and schema versioning.",
+              "- The `scope` is a routing hint: it should describe what agents will find here, NOT repeat evidence data. Keep it under 200 characters.",
+              "- The `overview` is the full narrative: aim for 3-8 sentences covering scope, structure, and key topics.",
+            ].join("\n"),
+          },
+        },
+      ],
+    }),
+  );
+
   return server;
+
+  function takePrimingContext(): VaultPrimingContext | undefined {
+    if (!firstToolCall) return undefined;
+    firstToolCall = false;
+    return {
+      scope: getVaultScope(),
+      hint: vaultOrientationHint,
+    };
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+interface VaultPrimingContext {
+  scope: string;
+  hint: string;
+}
+
 async function wrapTool<T>(
   workflow: WorkflowStateMachine,
   toolName: ToolName,
+  priming: VaultPrimingContext | undefined,
   fn: () => Promise<T>,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
   try {
     const result = await fn();
     const enriched = HintsEngine.formatResponse(workflow, toolName, result);
+    const response = attachPriming(enriched, priming);
     return {
-      content: [{ type: "text", text: JSON.stringify(enriched) }],
+      content: [{ type: "text", text: JSON.stringify(response) }],
     };
   } catch (err) {
     const message =
@@ -632,4 +706,14 @@ async function wrapTool<T>(
       isError: true,
     };
   }
+}
+
+function attachPriming<T>(response: T, priming: VaultPrimingContext | undefined): T | (T & { _meta: { vault_orientation: VaultPrimingContext } }) {
+  if (priming === undefined) return response;
+
+  return Object.assign({}, response, {
+    _meta: {
+      vault_orientation: priming,
+    },
+  });
 }

@@ -1,31 +1,27 @@
-export function generateOverviewStub(timestamp: string, mode: "auto" | "manual" = "manual"): string {
-  if (mode === "auto") {
+export function generateOverviewStub(timestamp: string, mode: "manual" | "assisted" = "manual"): string {
+  if (mode === "assisted") {
     return `---
-schema_version: 1
-generated_by: mcp-markdown-vault
-generated_at: ${timestamp}
-managed_by: auto
-vault_scope: "general markdown notes vault"
+schema_version: 3
+vault_scope: ""
+updated_at: ${timestamp}
+managed_by: host
 ---
 
 # Vault Overview
 
-<!-- This file is auto-generated. Manual edits will be overwritten on the next refresh. -->
+<!-- Host-assisted overview. Call prepare_overview to gather evidence, then call save_overview with your generated text. -->
 `;
   }
 
   return `---
-schema_version: 1
-generated_by: mcp-markdown-vault
-generated_at: ${timestamp}
+schema_version: 3
+vault_scope: ""
+updated_at: ${timestamp}
 managed_by: user
-vault_scope: "describe your vault contents here"
 ---
 
 # Vault Overview
 
-<!-- Free-form narrative about this vault's current contents and state.
-     Fully user-controlled — the server never modifies this file after creation.
-     Edit vault_scope above to set the one-line description shown to MCP hosts. -->
+<!-- User-authored overview. Edit this file to describe your vault. The server never modifies this file after creation. -->
 `;
 }
