@@ -1,6 +1,11 @@
 import yaml from "js-yaml";
 import type { IFileSystemAdapter } from "../domain/interfaces/file-system-adapter.js";
+import type { ISamplingProvider } from "../domain/interfaces/sampling-provider.js";
 import { generateVaultScope } from "./vault-scope.js";
+import { computeEvidenceHash, extractStoredHash } from "./evidence-hash.js";
+import type { VaultEvidence } from "./evidence-hash.js";
+import { buildSamplingPrompt, parseSamplingResponse, SAMPLING_TIMEOUT_MS } from "./sampling-prompt.js";
+import { MAX_CONTEXT_CHARS } from "./sampling-prompt.js";
 
 interface DirectorySummary {
   name: string;
@@ -16,49 +21,127 @@ const DEFAULT_THRESHOLD = 5;
 const MAX_DIRECTORIES = 10;
 const MAX_TAGS = 20;
 const MAX_TITLES = 10;
+const MIN_FILES_FOR_SAMPLING = 3;
 
 export class OverviewManager {
   private readonly fsAdapter: IFileSystemAdapter;
   private readonly threshold: number;
+  private readonly getSamplingProvider: (() => ISamplingProvider | null) | undefined;
+  private isGenerating = false;
 
   constructor(deps: {
     fsAdapter: IFileSystemAdapter;
     threshold?: number;
+    getSamplingProvider?: () => ISamplingProvider | null;
   }) {
     this.fsAdapter = deps.fsAdapter;
     this.threshold = deps.threshold ?? DEFAULT_THRESHOLD;
+    this.getSamplingProvider = deps.getSamplingProvider;
   }
 
   async generate(): Promise<string> {
     const timestamp = new Date().toISOString();
     const notePaths = await this.fsAdapter.listNotes();
-    const nonMetaNotePaths = notePaths.filter((notePath) => !notePath.startsWith("meta/"));
+    const nonMetaNotePaths = notePaths.filter((p) => !p.startsWith("meta/"));
 
     const topDirectories = this.collectTopDirectories(nonMetaNotePaths);
     const tags = await this.collectTags(nonMetaNotePaths);
     const recentTitles = await this.collectRecentTitles(nonMetaNotePaths);
     const directoryCount = new Set(
       nonMetaNotePaths
-        .map((notePath) => getTopLevelDirectory(notePath))
-        .filter((directory): directory is string => directory !== undefined),
+        .map((p) => getTopLevelDirectory(p))
+        .filter((d): d is string => d !== undefined),
     ).size;
 
-    const vaultScope = generateVaultScope({
+    const evidence: VaultEvidence = {
+      totalFiles: nonMetaNotePaths.length,
+      directories: topDirectories.map((d) => d.name),
+      tags: tags.map((t) => t.name),
+      titles: recentTitles,
+    };
+
+    const currentHash = computeEvidenceHash(evidence);
+
+    let storedHash: string | undefined;
+    try {
+      const existing = await this.fsAdapter.readNote("meta/overview.md");
+      storedHash = extractStoredHash(existing);
+    } catch {
+      storedHash = undefined;
+    }
+
+    if (storedHash === currentHash) {
+      const existing = await this.fsAdapter.readNote("meta/overview.md");
+      return existing;
+    }
+
+    let vaultScope: string;
+    let vaultContext: string;
+    let generationSource: "sampling" | "deterministic" = "deterministic";
+
+    const deterministicScope = generateVaultScope({
       totalFiles: nonMetaNotePaths.length,
       directories: topDirectories,
       tags,
     });
+    const deterministicContext = buildDeterministicContext(evidence);
+
+    if (
+      nonMetaNotePaths.length >= MIN_FILES_FOR_SAMPLING &&
+      this.getSamplingProvider !== undefined
+    ) {
+      const provider = this.getSamplingProvider();
+      if (provider !== null && provider.isAvailable()) {
+        try {
+          const request = buildSamplingPrompt(evidence);
+          const responsePromise = provider.createMessage(request);
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("sampling timeout")), SAMPLING_TIMEOUT_MS),
+          );
+          const response = await Promise.race([responsePromise, timeoutPromise]);
+          const parsed = parseSamplingResponse(response);
+          if (parsed.ok) {
+            vaultScope = parsed.vault_scope;
+            vaultContext = parsed.vault_context;
+            generationSource = "sampling";
+          } else {
+            vaultScope = deterministicScope;
+            vaultContext = deterministicContext;
+          }
+        } catch {
+          vaultScope = deterministicScope;
+          vaultContext = deterministicContext;
+        }
+      } else {
+        vaultScope = deterministicScope;
+        vaultContext = deterministicContext;
+      }
+    } else {
+      vaultScope = deterministicScope;
+      vaultContext = deterministicContext;
+    }
+
+    const frontmatter = yaml.dump({
+      schema_version: 2,
+      generated_by: "mcp-markdown-vault",
+      generated_at: timestamp,
+      managed_by: "auto",
+      generation_source: generationSource,
+      evidence_hash: currentHash,
+      vault_scope: vaultScope,
+      vault_context: vaultContext,
+    });
 
     return [
       "---",
-      "schema_version: 1",
-      "generated_by: mcp-markdown-vault",
-      `generated_at: ${timestamp}`,
-      "managed_by: auto",
-      `vault_scope: ${JSON.stringify(vaultScope)}`,
+      frontmatter.trimEnd(),
       "---",
       "",
       "# Vault Overview",
+      "",
+      "## About This Vault",
+      "",
+      vaultContext,
       "",
       "## Statistics",
       "",
@@ -81,8 +164,14 @@ export class OverviewManager {
   }
 
   async writeOverview(): Promise<void> {
-    const content = await this.generate();
-    await this.fsAdapter.writeNote("meta/overview.md", content, true);
+    if (this.isGenerating) return;
+    this.isGenerating = true;
+    try {
+      const content = await this.generate();
+      await this.fsAdapter.writeNote("meta/overview.md", content, true);
+    } finally {
+      this.isGenerating = false;
+    }
   }
 
   shouldRefresh(changeCount: number): boolean {
@@ -153,6 +242,17 @@ export class OverviewManager {
       return undefined;
     }
   }
+}
+
+function buildDeterministicContext(evidence: VaultEvidence): string {
+  const topDirs = evidence.directories.slice(0, 3).join(", ");
+  const topTags = evidence.tags.slice(0, 5).join(", ");
+  const parts: string[] = [`Vault with ${evidence.totalFiles} files`];
+  if (topDirs.length > 0) parts.push(`across ${topDirs}`);
+  const base = parts.join(" ") + ".";
+  const tagPart = topTags.length > 0 ? ` Main topics: ${topTags}.` : "";
+  const full = base + tagPart;
+  return full.length <= MAX_CONTEXT_CHARS ? full : full.slice(0, MAX_CONTEXT_CHARS - 1) + "\u2026";
 }
 
 function getTopLevelDirectory(notePath: string): string | undefined {

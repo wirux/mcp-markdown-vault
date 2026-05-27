@@ -20,3 +20,4 @@ export type {
   WatchEventType,
   WatchOptions,
 } from "./file-watcher.js";
+export type { ISamplingProvider, SamplingRequest, SamplingResponse } from "./sampling-provider.js";

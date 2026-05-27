@@ -502,6 +502,67 @@ describe("edit tool", () => {
     const file2 = await fs.readFile(path.join(tmpDir, "daily/2024-01-01.md"), "utf-8");
     expect(file2).toContain("Batch line 2.");
   });
+
+  it("returns a diff and does not write for single frontmatter_set dryRun", async () => {
+    const original = await fs.readFile(path.join(tmpDir, "hello.md"), "utf-8");
+
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "hello.md",
+        operation: "frontmatter_set",
+        content: '{"status":"draft"}',
+        dryRun: true,
+      },
+    });
+
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(parsed.result.message).toContain("dry-run");
+    expect(parsed.result.diff).toContain("status: draft");
+
+    const fileContent = await fs.readFile(path.join(tmpDir, "hello.md"), "utf-8");
+    expect(fileContent).toBe(original);
+    expect(fileContent).not.toContain("status: draft");
+  });
+
+  it("writes frontmatter for single frontmatter_set when dryRun is false", async () => {
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "hello.md",
+        operation: "frontmatter_set",
+        content: '{"status":"published"}',
+      },
+    });
+
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(parsed.result.message).toContain("patched");
+
+    const fileContent = await fs.readFile(path.join(tmpDir, "hello.md"), "utf-8");
+    expect(fileContent).toContain("status: published");
+  });
+
+  it("returns a diff and does not write for batch frontmatter_set dryRun", async () => {
+    const original = await fs.readFile(path.join(tmpDir, "hello.md"), "utf-8");
+
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        operations: [
+          { path: "hello.md", operation: "frontmatter_set", content: '{"category":"guide"}' },
+        ],
+        dryRun: true,
+      },
+    });
+
+    const parsed = JSON.parse((result.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(parsed.result.totalSucceeded).toBe(1);
+    expect(parsed.result.results[0].diff).toContain("category: guide");
+
+    const fileContent = await fs.readFile(path.join(tmpDir, "hello.md"), "utf-8");
+    expect(fileContent).toBe(original);
+    expect(fileContent).not.toContain("category: guide");
+  });
 });
 
 // ── workflow tool ─────────────────────────────────────────────────

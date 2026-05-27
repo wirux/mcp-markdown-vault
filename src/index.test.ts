@@ -158,7 +158,7 @@ describe("src/index composition root helpers", () => {
       mode: "manual",
       logger: { error: () => undefined },
     });
-    const serverFactory = createServerFactory({
+    const { factory: serverFactory } = createServerFactory({
       fsAdapter,
       vectorStore: new InMemoryVectorStore(),
       embedder: new FakeEmbedder(),
@@ -188,7 +188,7 @@ describe("src/index composition root helpers", () => {
       logger: { error: () => undefined },
     });
     const vectorStore = new ThrowingVectorStore();
-    const serverFactory = createServerFactory({
+    const { factory: serverFactory } = createServerFactory({
       fsAdapter,
       vectorStore,
       embedder: new FakeEmbedder(),
@@ -297,7 +297,7 @@ describe("vault scope from frontmatter integration", () => {
     const provider = makeVaultScopeProvider(fsAdapter);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const serverFactory = createServerFactory({
+    const { factory: serverFactory } = createServerFactory({
       fsAdapter,
       vectorStore: new InMemoryVectorStore(),
       embedder: new FakeEmbedder(),
@@ -319,7 +319,7 @@ describe("vault scope from frontmatter integration", () => {
     const provider = makeVaultScopeProvider(fsAdapter);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const serverFactory = createServerFactory({
+    const { factory: serverFactory } = createServerFactory({
       fsAdapter,
       vectorStore: new InMemoryVectorStore(),
       embedder: new FakeEmbedder(),
