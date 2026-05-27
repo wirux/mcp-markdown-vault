@@ -70,7 +70,7 @@ All file operations route through `SafePath` value object — prevents path trav
 | Variable | Default | Description |
 |---|---|---|
 | `VAULT_PATH` | `/vault` | Markdown vault directory |
-| `VAULT_CONTEXT_MODE` | `auto` | Vault orientation mode: `auto` (server generates `meta/overview.md`) or `manual` (user authors it) |
+| `VAULT_CONTEXT_MODE` | `assisted` | Vault orientation mode: `assisted` (host LLM/agent calls `prepare_overview`, writes prose, then calls `save_overview`) or `manual` (user authors `meta/overview.md`). `auto` is a deprecated alias for `assisted`. |
 | `VAULT_CONTEXT` | *(deprecated)* | Deprecated — ignored. Use `VAULT_CONTEXT_MODE` instead. |
 | `MCP_TRANSPORT_TYPE` | `stdio` | Transport: `stdio` (single client) or `sse` (multi-client HTTP) |
 | `PORT` | `3000` | HTTP port (SSE mode only) |
