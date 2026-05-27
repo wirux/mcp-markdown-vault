@@ -229,116 +229,42 @@ See [CLAUDE.md](CLAUDE.md) for detailed architecture docs and [CHANGELOG.md](CHA
 
 ---
 
-## Self-Orienting Context Layer
+## 🗺️ Self-Orienting Context Layer
 
-When an MCP client connects, the server provides vault context so connected agents can decide **when** to query this vault and **how** to use its tools — without explicit user instructions.
+Connected agents automatically discover **when** to query this vault and **how** to use its tools — no explicit user instructions needed.
 
-### Making agents find your vault
+> **Quick start:** Run the **`rebuild-overview`** MCP prompt after adding notes to your vault. This generates context that helps agents route queries to the right vault.
 
-In `assisted` mode (the default), the server provides structural evidence through the `system` tool. The host LLM or agent follows a 3-step flow:
-1. **Request Evidence**: Calls `system.prepare_overview` to gather structural data (file counts, top directories, common tags, recent titles).
-2. **Generate Prose**: The host LLM — not the server — uses this evidence to write a concise 3–8 sentence semantic description of the vault.
-3. **Save Overview**: Calls `system.save_overview` with the generated overview text AND a dedicated scope string to store schema v3 context in `meta/overview.md`.
+### How it works
 
-Clients that support MCP prompt discovery can trigger this flow via the **`rebuild-overview`** prompt (registered as a first-class MCP prompt). In clients with prompt menus, choose **Rebuild Vault Overview**. In chat-driven clients, ask the agent to “use the `rebuild-overview` prompt”. The prompt instructs the host LLM to execute the full assisted cycle — the server still does not generate prose itself.
-
-The legacy `auto` mode is deprecated and maps to `assisted`. It emits a warning on startup. No immediate migration action is required, but update configuration to `VAULT_CONTEXT_MODE=assisted` for clarity.
-
-In `manual` mode, you author `meta/overview.md` yourself. Set `VAULT_CONTEXT_MODE=manual` and use the markdown body for narrative context. Manual mode is authoritative: the server creates the file if missing but never overwrites it.
-
-```json
-{
-  "mcpServers": {
-    "markdown-vault": {
-      "command": "npx",
-      "args": ["-y", "@wirux/mcp-markdown-vault"],
-      "env": {
-        "VAULT_PATH": "/path/to/your/vault"
-      }
-    }
-  }
-}
-```
-
-In both modes, `meta/overview.md` is the canonical source of vault description for connected agents: `vault_scope` in frontmatter (if present) supplies the short routing hint, while the markdown body and `meta/contract.md` feed the richer `vault://overview` resource.
-
-### Quick start: rebuild your vault overview
-
-After your vault contains representative notes, run the assisted rebuild flow once:
-
-1. Start the server in assisted mode (default) with `VAULT_PATH` pointing at your vault.
-2. In your MCP client, invoke **Rebuild Vault Overview** / `rebuild-overview`.
-3. The agent will call `system.prepare_overview`, write a concise overview and a dedicated scope line from the returned evidence, then call `system.save_overview` with both.
-4. Verify the result by reading `vault://overview` or checking `<VAULT_PATH>/meta/overview.md`.
-
-If your client does not expose MCP prompts, ask the agent directly: “Call `system.prepare_overview`, then generate a concise vault overview and a short scope line (what agents will find here, max 200 chars), then call `system.save_overview` with both the `overview` and the `scope`.”
-
-### How context is delivered
-
-The server uses four complementary mechanisms so behavior degrades gracefully across clients with different MCP feature support:
+The server delivers vault context through multiple mechanisms (graceful degradation across clients):
 
 | Mechanism | When | What the agent sees |
 |---|---|---|
-| **`instructions` field** | MCP handshake (session start) | The current `vault_scope` + tool dispatcher summary. Supported by Claude Desktop, Claude Code, Cursor. |
-| **MCP Resources** | On-demand via `ReadResource` | `vault://overview` (composed view with live stats, overview, and conventions), `vault://stats` (live JSON) |
-| **First-call priming** | First tool call per session, regardless of tool | `_meta.vault_orientation` block with the current `vault_scope` + hint to read `vault://overview` |
-| **Tool descriptions** | Tool listing | Include the current `vault_scope` string for tool-selection matching |
+| `instructions` field | MCP handshake | `vault_scope` + tool summary |
+| MCP Resources | On-demand | `vault://overview` (stats + overview + conventions) |
+| First-call priming | First tool call per session | `vault_scope` + hint to read `vault://overview` |
+| Tool descriptions | Tool listing | `vault_scope` string for routing |
 
-Even if a client supports none of these (rare), the agent still discovers vault content through normal tool use.
+### Modes
 
-### Two files: contract vs overview
+| Mode | How overview is managed |
+|---|---|
+| `assisted` *(default)* | Host agent calls `system.prepare_overview` → generates prose → calls `system.save_overview` |
+| `manual` | You author `meta/overview.md` yourself; server creates stub but never overwrites |
 
-On first startup, the server creates two files in `<VAULT_PATH>/meta/`. In `manual` mode, both are created once and **never overwritten** — they are fully yours to edit. In `assisted` mode, `meta/overview.md` is managed by the host via the `system` tool actions (`prepare_overview` and `save_overview`). `meta/contract.md` is created once and never overwritten.
+To rebuild in assisted mode: invoke the **`rebuild-overview`** MCP prompt, or ask your agent to call `system.prepare_overview` then `system.save_overview`.
 
-#### `meta/contract.md` — Tool optimization (power users)
+### Vault meta files
 
-Tells agents **how** to use the vault's tools efficiently. Pre-filled with sensible defaults:
+On first startup, the server creates two files in `<VAULT_PATH>/meta/`:
 
-| Section | Purpose | Drives which tool |
+| File | Purpose | Managed by |
 |---|---|---|
-| `## Frontmatter Schema` | YAML keys and types used across notes | `view.frontmatter_get`, `edit.frontmatter_set` |
-| `## Tag Conventions` | Tag naming rules and hierarchies | `view.global_search` query building |
-| `## Search Hints` | Which search action fits which query type | All `view` actions |
-| `## Naming Conventions` | File naming patterns | `vault.create` |
-| `## Note Template` | Default structure for new notes | `vault.create`, `vault.create_from_template` |
+| `meta/overview.md` | Vault description + `vault_scope` routing hint | Host agent (assisted) or you (manual) |
+| `meta/contract.md` | Tool usage conventions (frontmatter schema, search hints, naming) | Created once, never overwritten |
 
-Most users don't need to edit this. Power users can customize it to match their vault's specific conventions — agents read it as part of the `vault://overview` resource.
-
-> **Tip:** Keep `vault_scope` short and specific — it is the semantic one-line summary exposed to MCP hosts so they know what information this vault can answer. Put richer, multi-line context in the body of `meta/overview.md`.
-
-The `vault_scope` frontmatter field is a semantic routing hint for connected agents. It should describe what information the host can find in this MCP server, not just repeat structural facts like file counts or tags. It helps agents decide when this vault is relevant before they read full notes. You can edit it manually if needed; changes are reflected in `vault://overview` on the next read, while handshake-visible scope may require reconnecting the MCP client.
-
-#### `meta/overview.md` — Vault description (read-side)
-
-In `assisted` mode: the host LLM generates this after gathering structural evidence from the server. The frontmatter uses schema v3 and includes a dedicated `vault_scope` routing hint (max 200 characters) written by the host to describe what agents can find in this vault. The body contains the full narrative description that connected agents use to understand the vault's contents.
-
-In `manual` mode: created as an editable stub. You control the narrative description in the body: active projects, key topic areas, organizational philosophy.
-
-Its frontmatter `vault_scope` is the primary source for handshake-visible one-line context, and its body is the primary source for the `vault://overview` resource that agents read on demand.
-
-### Hot reload behavior
-
-| What changed | Effect | Restart needed? |
-|---|---|---|
-| `meta/contract.md` | Reflected in `vault://overview` on next read | No |
-| `meta/overview.md` body | Reflected in `vault://overview` on next read | No |
-| Manual edits to `vault_scope` | Reflected in `vault://overview` on next read; restart/reconnect to guarantee new handshake-visible scope | Usually yes |
-| `VAULT_CONTEXT_MODE` env var | Changes manual vs assisted behavior | Yes |
-
-### Migration notes
-
-On first run after upgrade, `meta/contract.md` and `meta/overview.md` are auto-created if missing. Existing files are never overwritten. Overviews now use schema v3 frontmatter when saved through the `system` tool.
-
-Legacy `auto` mode is mapped to `assisted` with a deprecation warning. If you previously relied on server auto-generation, your host agent should now perform the 3-step assisted flow using `system.prepare_overview` and `system.save_overview`.
-
-If you have a `meta/contract.md` from other tooling with a different schema, review compatibility — the server-generated contract is dedicated to mcp-markdown-vault navigation hints.
-
-### Troubleshooting overview rebuilds
-
-- **Prompt is not visible in your client**: use the manual instruction above; it exercises the same `prepare_overview` → `save_overview` flow.
-- **Saved overview looks stale**: run `system.prepare_overview` again after adding notes, then save a newly generated overview.
-- **`save_overview` fails**: ensure the overview text is non-empty and the server can write to `<VAULT_PATH>/meta/overview.md`.
-- **First-call priming still shows old wording after an upgrade**: rebuild the project or update the package, then restart/reconnect the MCP client so it loads the new server artifact.
+> **Tip:** Keep `vault_scope` short and specific — it tells MCP hosts what information this vault can answer.
 
 
 ---
