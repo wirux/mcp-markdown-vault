@@ -41,7 +41,7 @@ describe("OverviewManager", () => {
     const result = await manager.generate();
 
     expect(result).toContain("managed_by: auto");
-    expect(result).toContain("generated_at: 2026-01-15T10:00:00.000Z");
+    expect(result).toMatch(/generated_at: '?2026-01-15T10:00:00\.000Z'?/);
   });
 
   it("includes directory listing with correct counts and tag frequencies", async () => {
@@ -183,5 +183,101 @@ describe("OverviewManager", () => {
     expect(result).toContain("- `kept` (1)");
     expect(result).not.toContain("missing");
     expect(result).toContain("- Kept");
+  });
+
+  it("uses deterministic fallback when no sampling provider is given", async () => {
+    const { adapter } = await makeTempVault();
+    for (let i = 0; i < 5; i++) {
+      await adapter.writeNote(`notes/note${i}.md`, `# Note ${i}\n`);
+    }
+    const manager = new OverviewManager({ fsAdapter: adapter });
+    const result = await manager.generate();
+    expect(result).toContain("generation_source: deterministic");
+    expect(result).toContain("vault_scope:");
+    expect(result).toContain("vault_context:");
+  });
+
+  it("uses sampling output when provider returns valid response", async () => {
+    const { adapter } = await makeTempVault();
+    for (let i = 0; i < 5; i++) {
+      await adapter.writeNote(`notes/note${i}.md`, `# Note ${i}\n`);
+    }
+    const mockProvider = {
+      isAvailable: () => true,
+      createMessage: async () => ({
+        text: JSON.stringify({
+          vault_scope: "Semantic scope from LLM",
+          vault_context: "Semantic context from LLM",
+        }),
+      }),
+    };
+    const manager = new OverviewManager({
+      fsAdapter: adapter,
+      getSamplingProvider: () => mockProvider,
+    });
+    const result = await manager.generate();
+    expect(result).toContain("generation_source: sampling");
+    expect(result).toContain("Semantic scope from LLM");
+    expect(result).toContain("Semantic context from LLM");
+  });
+
+  it("falls back to deterministic when sampling returns invalid JSON", async () => {
+    const { adapter } = await makeTempVault();
+    for (let i = 0; i < 5; i++) {
+      await adapter.writeNote(`notes/note${i}.md`, `# Note ${i}\n`);
+    }
+    const mockProvider = {
+      isAvailable: () => true,
+      createMessage: async () => ({ text: "not valid json" }),
+    };
+    const manager = new OverviewManager({
+      fsAdapter: adapter,
+      getSamplingProvider: () => mockProvider,
+    });
+    const result = await manager.generate();
+    expect(result).toContain("generation_source: deterministic");
+  });
+
+  it("skips sampling for small vault (fewer than 3 content files)", async () => {
+    const { adapter } = await makeTempVault();
+    await adapter.writeNote("notes/a.md", "# A\n");
+    await adapter.writeNote("notes/b.md", "# B\n");
+    let samplingCalled = false;
+    const mockProvider = {
+      isAvailable: () => true,
+      createMessage: async () => {
+        samplingCalled = true;
+        return { text: JSON.stringify({ vault_scope: "s", vault_context: "c" }) };
+      },
+    };
+    const manager = new OverviewManager({
+      fsAdapter: adapter,
+      getSamplingProvider: () => mockProvider,
+    });
+    await manager.generate();
+    expect(samplingCalled).toBe(false);
+  });
+
+  it("skips regeneration when evidence hash is unchanged", async () => {
+    const { adapter } = await makeTempVault();
+    for (let i = 0; i < 5; i++) {
+      await adapter.writeNote(`notes/note${i}.md`, `# Note ${i}\n`);
+    }
+    const manager = new OverviewManager({ fsAdapter: adapter });
+    await manager.writeOverview();
+    let samplingCalled = false;
+    const mockProvider = {
+      isAvailable: () => true,
+      createMessage: async () => {
+        samplingCalled = true;
+        return { text: JSON.stringify({ vault_scope: "s", vault_context: "c" }) };
+      },
+    };
+    const manager2 = new OverviewManager({
+      fsAdapter: adapter,
+      getSamplingProvider: () => mockProvider,
+    });
+    await manager2.generate();
+    expect(samplingCalled).toBe(false);
   });
 });

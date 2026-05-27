@@ -19,6 +19,7 @@ export function parseTransportType(value?: string): TransportType {
 export interface SseAppOptions {
   authToken?: string | undefined;
   bodyLimit?: string | undefined;
+  onSessionClose?: ((server: McpServer) => void) | undefined;
 }
 
 export interface SseApp {
@@ -66,6 +67,7 @@ export function createSseApp(
 
     res.on("close", () => {
       sessions.delete(transport.sessionId);
+      options?.onSessionClose?.(server);
     });
 
     await server.connect(transport);
@@ -125,6 +127,7 @@ export async function startTransport(
     authToken?: string | undefined;
     hostBindAddress?: string | undefined;
     bodyLimit?: string | undefined;
+    onSessionClose?: ((server: McpServer) => void) | undefined;
   },
 ): Promise<TransportHandle> {
   if (type === "stdio") {
@@ -141,6 +144,7 @@ export async function startTransport(
   const { app, sessions } = createSseApp(serverFactory, {
     authToken: options?.authToken,
     bodyLimit: options?.bodyLimit,
+    onSessionClose: options?.onSessionClose,
   });
   const port = options?.port ?? 3000;
   const host = options?.hostBindAddress ?? "127.0.0.1";

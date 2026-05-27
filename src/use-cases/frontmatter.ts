@@ -33,6 +33,16 @@ export interface ISetFrontmatterUseCase {
   execute(request: SetFrontmatterRequest): Promise<SetFrontmatterResponse>;
 }
 
+export function parseFrontmatterPayload(content: string): Record<string, unknown> {
+  try {
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    throw new InvalidFrontmatterPayloadError(
+      "content is not valid JSON",
+    );
+  }
+}
+
 /**
  * Reads the YAML frontmatter of a markdown note as a plain object.
  */
@@ -55,15 +65,7 @@ export class SetFrontmatterUseCase implements ISetFrontmatterUseCase {
   constructor(private readonly repo: IMarkdownRepository) {}
 
   async execute(request: SetFrontmatterRequest): Promise<SetFrontmatterResponse> {
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(request.content) as Record<string, unknown>;
-    } catch {
-      throw new InvalidFrontmatterPayloadError(
-        "content is not valid JSON",
-      );
-    }
-
+    const parsed = parseFrontmatterPayload(request.content);
     await this.repo.updateFrontmatter(request.path, parsed);
     return { message: `Frontmatter updated: ${request.path}` };
   }

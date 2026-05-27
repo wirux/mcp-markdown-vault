@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ServerOptions } from "@modelcontextprotocol/sdk/server/index.js";
+import yaml from "js-yaml";
 import { z } from "zod";
 import type { IFileSystemAdapter } from "../domain/interfaces/file-system-adapter.js";
 import type { IEmbeddingProvider, IVectorStore } from "../domain/interfaces/index.js";
@@ -15,7 +16,7 @@ import { HybridSearcher } from "../use-cases/hybrid-search.js";
 import { FreeformEditor } from "../use-cases/freeform-editor.js";
 import { ReadByHeadingUseCase } from "../use-cases/read-by-heading.js";
 import { BulkReadUseCase } from "../use-cases/bulk-read.js";
-import { GetFrontmatterUseCase, SetFrontmatterUseCase } from "../use-cases/frontmatter.js";
+import { GetFrontmatterUseCase, parseFrontmatterPayload } from "../use-cases/frontmatter.js";
 import { UpdateFileUseCase } from "../use-cases/update-file.js";
 import { DryRunEditor } from "../use-cases/dry-run-edit.js";
 import { CreateFromTemplateUseCase } from "../use-cases/create-from-template.js";
@@ -283,11 +284,34 @@ export function createMcpServer(deps: McpDependencies): McpServer {
 
       // ── Frontmatter operation ──────────────────────────────────
       if (operation === "frontmatter_set") {
-        const repo = new MarkdownFileRepository(deps.fsAdapter, pipeline);
-        const useCase = new SetFrontmatterUseCase(repo);
-        const result = await useCase.execute({ path: notePath, content });
-        await syncIndexes(notePath);
-        return result.message;
+        const tree = pipeline.parse(source);
+        const yamlNode = tree.children.find((node) => node.type === "yaml");
+        const parsed = parseFrontmatterPayload(content);
+
+        if (yamlNode && yamlNode.type === "yaml") {
+          const existing = yaml.load(yamlNode.value);
+          const mergedFrontmatter = Object.assign(
+            {},
+            typeof existing === "object" && existing !== null ? existing : {},
+            parsed,
+          );
+          yamlNode.value = yaml.dump(mergedFrontmatter).trimEnd();
+        } else {
+          tree.children.unshift({
+            type: "yaml",
+            value: yaml.dump(parsed).trimEnd(),
+          });
+        }
+
+        const newContent = pipeline.stringify(tree);
+        const result = await dryRunEditor.execute({
+          path: notePath,
+          oldContent: source,
+          newContent,
+          dryRun: dryRun ?? false,
+          operationLabel: "frontmatter_set",
+        });
+        return executeEdit(result);
       }
 
       // ── AST operations ──────────────────────────────────────────

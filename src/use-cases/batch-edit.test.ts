@@ -111,6 +111,28 @@ describe("BatchEditService", () => {
     expect(afterContent).toBe(original);
   });
 
+  it("dryRun does not write for frontmatter_set", async () => {
+    await fs.writeFile(
+      path.join(tmpDir, "note3.md"),
+      "---\ntags:\n  - gamma\n---\n\n# Note 3\n\nBody.\n",
+    );
+    const original = await fs.readFile(path.join(tmpDir, "note3.md"), "utf-8");
+
+    const operations: EditOperation[] = [
+      { path: "note3.md", operation: "frontmatter_set", content: '{"status":"draft"}' },
+    ];
+
+    const result = await service.execute({ operations, dryRun: true });
+
+    expect(result.totalSucceeded).toBe(1);
+    expect(result.results[0]!.status).toBe("success");
+    expect(result.results[0]!.diff).toBeDefined();
+    expect(result.results[0]!.diff).toContain("status: draft");
+
+    const afterContent = await fs.readFile(path.join(tmpDir, "note3.md"), "utf-8");
+    expect(afterContent).toBe(original);
+  });
+
   it("handles mixed operation types", async () => {
     const operations: EditOperation[] = [
       { path: "note1.md", operation: "append", content: "Added.", heading: "Section A", headingDepth: 2 },

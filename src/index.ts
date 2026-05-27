@@ -12,7 +12,7 @@ import {
   validateVectorStore,
   StartupError,
 } from "./infrastructure/startup-checks.js";
-import type { IEmbeddingProvider } from "./domain/interfaces/index.js";
+import type { IEmbeddingProvider, ISamplingProvider } from "./domain/interfaces/index.js";
 import type { IFileSystemAdapter } from "./domain/interfaces/file-system-adapter.js";
 import { WorkflowStateMachine } from "./use-cases/workflow-state.js";
 import { VaultIndexer } from "./use-cases/vault-indexer.js";
@@ -32,6 +32,8 @@ import {
 } from "./use-cases/vault-context-config.js";
 import { OverviewManager } from "./use-cases/overview-manager.js";
 import { extractVaultScopeFromFrontmatter } from "./use-cases/vault-scope.js";
+import { SamplingProviderRegistry } from "./presentation/sampling-provider-registry.js";
+import { McpSamplingAdapter } from "./presentation/mcp-sampling-adapter.js";
 
 export const DEFAULT_VAULT_SCOPE = "general markdown notes vault";
 
@@ -101,15 +103,32 @@ export function makeVaultScopeProvider(
 
 export function createServerFactory(
   deps: Omit<McpDependencies, "workflow">,
-): () => ReturnType<typeof createMcpServer> {
-  return () =>
-    createMcpServer({
+  registry?: SamplingProviderRegistry,
+): { factory: () => ReturnType<typeof createMcpServer>; unregisterForServer: (server: ReturnType<typeof createMcpServer>) => void } {
+  const serverAdapterMap = new Map<ReturnType<typeof createMcpServer>, ISamplingProvider>();
+  const factory = () => {
+    const server = createMcpServer({
       ...deps,
       workflow: new WorkflowStateMachine(),
       instructions: composeInstructions(
         (deps.getVaultScope ?? (() => DEFAULT_VAULT_SCOPE))(),
       ),
     });
+    if (registry !== undefined) {
+      const adapter = new McpSamplingAdapter(server);
+      registry.register(adapter);
+      serverAdapterMap.set(server, adapter);
+    }
+    return server;
+  };
+  const unregisterForServer = (server: ReturnType<typeof createMcpServer>) => {
+    const adapter = serverAdapterMap.get(server);
+    if (adapter !== undefined && registry !== undefined) {
+      registry.unregister(adapter);
+      serverAdapterMap.delete(server);
+    }
+  };
+  return { factory, unregisterForServer };
 }
 
 /**
@@ -221,8 +240,13 @@ async function main(): Promise<void> {
   });
 
   let overviewManager: OverviewManager | undefined;
+  let samplingRegistry: SamplingProviderRegistry | undefined;
   if (config.mode === "auto") {
-    overviewManager = new OverviewManager({ fsAdapter });
+    samplingRegistry = new SamplingProviderRegistry();
+    overviewManager = new OverviewManager({
+      fsAdapter,
+      getSamplingProvider: () => samplingRegistry!.getProvider(),
+    });
     indexer.addOnThresholdReached(() => {
       overviewManager!.writeOverview().then(() => {
         scopeProvider.refresh();
@@ -233,7 +257,7 @@ async function main(): Promise<void> {
     });
   }
 
-  const serverFactory = createServerFactory({
+  const { factory: serverFactory, unregisterForServer } = createServerFactory({
     fsAdapter,
     vectorStore,
     embedder,
@@ -241,7 +265,7 @@ async function main(): Promise<void> {
     backlinkIndex,
     indexer,
     getVaultScope,
-  });
+  }, samplingRegistry);
 
   indexer
     .indexAll()
@@ -280,6 +304,7 @@ async function main(): Promise<void> {
     authToken,
     hostBindAddress,
     bodyLimit,
+    onSessionClose: unregisterForServer,
   });
 
   // Handle shutdown
