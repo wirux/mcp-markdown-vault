@@ -2,7 +2,7 @@ import yaml from "js-yaml";
 import type { IFileSystemAdapter } from "../domain/interfaces/file-system-adapter.js";
 import type { IDiffService } from "../domain/interfaces/diff-service.js";
 import type { IMarkdownRepository } from "../domain/interfaces/markdown-repository.js";
-import { BatchLimitExceededError } from "../domain/errors/index.js";
+import { BatchLimitExceededError, AmbiguousHeadingTargetError } from "../domain/errors/index.js";
 import type { MarkdownPipeline } from "./markdown-pipeline.js";
 import { AstNavigator } from "./ast-navigation.js";
 import { AstPatcher } from "./ast-patcher.js";
@@ -15,7 +15,7 @@ const MAX_OPERATIONS = 50;
 /** Pojedyncza operacja edycji w batch. */
 export interface EditOperation {
   path: string;
-  operation: "append" | "prepend" | "replace" | "line_replace" | "string_replace" | "frontmatter_set";
+  operation: "append" | "prepend" | "replace" | "delete" | "line_replace" | "string_replace" | "frontmatter_set";
   content: string;
   heading?: string | undefined;
   headingDepth?: number | undefined;
@@ -24,6 +24,7 @@ export interface EditOperation {
   endLine?: number | undefined;
   searchText?: string | undefined;
   replaceAll?: boolean | undefined;
+  replaceMode?: "body" | "section" | undefined;
 }
 
 /** Batch edit request. */
@@ -40,6 +41,8 @@ export interface BatchEditResult {
   status: "success" | "error";
   diff?: string | undefined;
   error?: string | undefined;
+  changed?: boolean | undefined;
+  warnings?: string[] | undefined;
 }
 
 /** Batch edit response. */
@@ -99,6 +102,7 @@ export class BatchEditService {
           action: op.operation,
           status: "success",
           diff: editResult.diff,
+          changed: editResult.changed,
         });
         totalSucceeded++;
       } catch (err) {
@@ -129,8 +133,19 @@ export class BatchEditService {
   private async executeSingle(
     op: EditOperation,
     dryRun: boolean,
-  ): Promise<{ message: string; diff?: string | undefined }> {
+  ): Promise<{ message: string; diff?: string | undefined; changed?: boolean | undefined }> {
     const source = await this.fsAdapter.readNote(op.path);
+
+    const withChanged = async (newContent: string, label: string) => {
+      const editResult = await this.dryRunEditor.execute({
+        path: op.path,
+        oldContent: source,
+        newContent,
+        dryRun,
+        operationLabel: label,
+      });
+      return { ...editResult, changed: source !== newContent };
+    };
 
     // ── Freeform: line_replace ────────────────────────────────────
     if (op.operation === "line_replace") {
@@ -140,13 +155,7 @@ export class BatchEditService {
       const newContent = FreeformEditor.lineReplace(
         source, op.startLine, op.endLine, op.content,
       );
-      return this.dryRunEditor.execute({
-        path: op.path,
-        oldContent: source,
-        newContent,
-        dryRun,
-        operationLabel: `line_replace lines ${op.startLine}-${op.endLine}`,
-      });
+      return withChanged(newContent, `line_replace lines ${op.startLine}-${op.endLine}`);
     }
 
     // ── Freeform: string_replace ─────────────────────────────────
@@ -157,13 +166,7 @@ export class BatchEditService {
       const newContent = FreeformEditor.stringReplace(
         source, op.searchText, op.content, op.replaceAll ?? false,
       );
-      return this.dryRunEditor.execute({
-        path: op.path,
-        oldContent: source,
-        newContent,
-        dryRun,
-        operationLabel: "string_replace",
-      });
+      return withChanged(newContent, "string_replace");
     }
 
     // ── Frontmatter ──────────────────────────────────────────────
@@ -188,16 +191,10 @@ export class BatchEditService {
       }
 
       const newContent = this.pipeline.stringify(tree);
-      return this.dryRunEditor.execute({
-        path: op.path,
-        oldContent: source,
-        newContent,
-        dryRun,
-        operationLabel: "frontmatter_set",
-      });
+      return withChanged(newContent, "frontmatter_set");
     }
 
-    // ── Operacje AST (append / prepend / replace) ────────────────
+    // ── Operacje AST (append / prepend / replace / delete) ──────────
     const tree = this.pipeline.parse(source);
 
     let target: Parameters<typeof AstPatcher.apply>[1]["target"];
@@ -210,6 +207,10 @@ export class BatchEditService {
         .filter((h) => h.depth === depth)
         .map((h) => h.title);
       if (candidates.length > 0) {
+        const exactMatches = AstNavigator.findAllMatchingHeadings(tree, op.heading, depth);
+        if (exactMatches.length > 1) {
+          throw new AmbiguousHeadingTargetError(op.heading, depth, exactMatches);
+        }
         const matched = FuzzyMatcher.bestMatch(op.heading, candidates, 0.6);
         target = matched
           ? { heading: matched.match, depth }
@@ -221,15 +222,9 @@ export class BatchEditService {
       target = "document";
     }
 
-    AstPatcher.apply(tree, { type: op.operation, target, content: op.content }, this.pipeline);
+    AstPatcher.apply(tree, { type: op.operation, target, content: op.content, replaceMode: op.replaceMode }, this.pipeline);
     const newContent = this.pipeline.stringify(tree);
 
-    return this.dryRunEditor.execute({
-      path: op.path,
-      oldContent: source,
-      newContent,
-      dryRun,
-      operationLabel: op.operation,
-    });
+    return withChanged(newContent, op.operation);
   }
 }

@@ -14,6 +14,24 @@ export interface DryRunEditRequest {
 export interface DryRunEditResponse {
   message: string;
   diff?: string | undefined;
+  /** Whether the operation actually changed content. */
+  changed?: boolean | undefined;
+  /** The operation type that was performed. */
+  operation?: string | undefined;
+  /** The note path that was edited. */
+  path?: string | undefined;
+  /** Non-fatal warnings generated during the operation. */
+  warnings?: string[] | undefined;
+  /** The resolved heading target (after fuzzy matching). */
+  targetResolved?: string | undefined;
+  /** Modified section content (when returnContent is "section"). */
+  modifiedSection?: string | undefined;
+  /** Full file content (when returnContent is "file"). */
+  fileContent?: string | undefined;
+  /** True when content was truncated due to size guard. */
+  truncated?: boolean | undefined;
+  /** Deleted section content (for delete operation when returnContent !== "none"). */
+  deletedContent?: string | undefined;
 }
 
 /** Contract for the DryRunEditor use case. */

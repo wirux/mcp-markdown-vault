@@ -108,6 +108,26 @@ export class AstNavigator {
     }
     return result;
   }
+
+  static findAllMatchingHeadings(
+    tree: Root,
+    title: string,
+    depth: number,
+  ): HeadingInfo[] {
+    const lowerTitle = title.toLowerCase();
+    const result: HeadingInfo[] = [];
+    for (let i = 0; i < tree.children.length; i++) {
+      const node = tree.children[i]!;
+      if (
+        node.type === "heading" &&
+        node.depth === depth &&
+        AstNavigator.getHeadingText(node).toLowerCase() === lowerTitle
+      ) {
+        result.push({ title: AstNavigator.getHeadingText(node), depth: node.depth, index: i });
+      }
+    }
+    return result;
+  }
 }
 
 /** Recursively extract plain text from phrasing content nodes. */
