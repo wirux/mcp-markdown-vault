@@ -7,7 +7,7 @@ import { MarkdownFileRepository } from "../infrastructure/markdown-file-reposito
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
 import { MarkdownPipeline } from "./markdown-pipeline.js";
 import { BatchEditService, type EditOperation } from "./batch-edit.js";
-import { BatchLimitExceededError } from "../domain/errors/index.js";
+import { BatchLimitExceededError, AmbiguousHeadingTargetError } from "../domain/errors/index.js";
 
 let tmpDir: string;
 let service: BatchEditService;
@@ -174,5 +174,107 @@ describe("BatchEditService", () => {
     await expect(
       service.execute({ operations }),
     ).rejects.toThrow(BatchLimitExceededError);
+  });
+});
+
+describe("BatchEditService — duplicate heading detection", () => {
+  let dupFile: string;
+
+  beforeEach(async () => {
+    dupFile = path.join(tmpDir, "dup.md");
+    await fs.writeFile(
+      dupFile,
+      "# Title\n\n## Setup\n\nFirst setup.\n\n## Setup\n\nSecond setup.\n\n## Different\n\nOther.\n",
+    );
+  });
+
+  it("throws AmbiguousHeadingTargetError when two headings match exactly", async () => {
+    const result = await service.execute({
+      operations: [{ path: "dup.md", operation: "replace", heading: "Setup", headingDepth: 2, content: "New." }],
+    });
+    expect(result.results[0]!.status).toBe("error");
+    expect(result.results[0]!.error).toContain("Ambiguous heading target");
+  });
+
+  it("includes blockId guidance in ambiguous heading error", async () => {
+    const result = await service.execute({
+      operations: [{ path: "dup.md", operation: "replace", heading: "Setup", headingDepth: 2, content: "New." }],
+    });
+    expect(result.results[0]!.error).toContain("blockId");
+  });
+
+  it("succeeds when heading is unique (no ambiguity)", async () => {
+    const result = await service.execute({
+      operations: [{ path: "dup.md", operation: "append", heading: "Different", headingDepth: 2, content: "Appended." }],
+    });
+    expect(result.results[0]!.status).toBe("success");
+  });
+
+  it("fuzzy single match still resolves when no duplicate exists", async () => {
+    const result = await service.execute({
+      operations: [{ path: "dup.md", operation: "append", heading: "Diferent", headingDepth: 2, content: "Appended." }],
+    });
+    expect(result.results[0]!.status).toBe("success");
+  });
+});
+
+describe("BatchEditService — delete operation", () => {
+  let deleteFile: string;
+
+  beforeEach(async () => {
+    deleteFile = path.join(tmpDir, "delete.md");
+    await fs.writeFile(
+      deleteFile,
+      "# Title\n\n## Keep\n\nKeep body.\n\n## Remove\n\nRemove body.\n\n### Child\n\nChild body.\n\n## Keep Too\n\nKeep too body.\n",
+    );
+  });
+
+  it("deletes heading section including child headings", async () => {
+    const result = await service.execute({
+      operations: [{ path: "delete.md", operation: "delete", heading: "Remove", headingDepth: 2, content: "" }],
+    });
+    expect(result.results[0]!.status).toBe("success");
+    const content = await fs.readFile(deleteFile, "utf8");
+    expect(content).toContain("## Keep");
+    expect(content).not.toContain("## Remove");
+    expect(content).not.toContain("### Child");
+    expect(content).toContain("## Keep Too");
+  });
+
+  it("delete with dryRun does not write the file", async () => {
+    const original = await fs.readFile(deleteFile, "utf8");
+    const result = await service.execute({
+      operations: [{ path: "delete.md", operation: "delete", heading: "Remove", headingDepth: 2, content: "" }],
+      dryRun: true,
+    });
+    expect(result.results[0]!.status).toBe("success");
+    expect(result.results[0]!.diff).toBeDefined();
+    const after = await fs.readFile(deleteFile, "utf8");
+    expect(after).toBe(original);
+  });
+
+  it("delete fails with error when heading does not exist", async () => {
+    const result = await service.execute({
+      operations: [{ path: "delete.md", operation: "delete", heading: "Nonexistent", headingDepth: 2, content: "" }],
+    });
+    expect(result.results[0]!.status).toBe("error");
+  });
+});
+
+describe("BatchEditService — changed field", () => {
+  it("result has changed=true after successful replace that modifies content", async () => {
+    const result = await service.execute({
+      operations: [{ path: "note1.md", operation: "replace", heading: "Section A", headingDepth: 2, content: "New content." }],
+    });
+    expect(result.results[0]!.status).toBe("success");
+    expect(result.results[0]!.changed).toBe(true);
+  });
+
+  it("result has changed=true after append", async () => {
+    const result = await service.execute({
+      operations: [{ path: "note1.md", operation: "append", heading: "Section A", headingDepth: 2, content: "Extra line." }],
+    });
+    expect(result.results[0]!.status).toBe("success");
+    expect(result.results[0]!.changed).toBe(true);
   });
 });

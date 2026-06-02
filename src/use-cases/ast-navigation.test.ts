@@ -126,4 +126,56 @@ describe("AstNavigator", () => {
       expect(headings[0]!.title).toBe("Introduction");
     });
   });
+
+  describe("findAllMatchingHeadings", () => {
+    const DUP_DOC = [
+      "# Title",
+      "",
+      "## Setup",
+      "",
+      "First setup.",
+      "",
+      "## Setup",
+      "",
+      "Second setup.",
+      "",
+      "## Different",
+      "",
+      "Other content.",
+    ].join("\n");
+
+    it("returns empty array when no heading matches", () => {
+      const tree = pipeline.parse(DUP_DOC);
+      const matches = AstNavigator.findAllMatchingHeadings(tree, "Nonexistent", 2);
+      expect(matches).toHaveLength(0);
+    });
+
+    it("returns single result when heading is unique", () => {
+      const tree = pipeline.parse(DUP_DOC);
+      const matches = AstNavigator.findAllMatchingHeadings(tree, "Different", 2);
+      expect(matches).toHaveLength(1);
+      expect(matches[0]!.title).toBe("Different");
+    });
+
+    it("returns all duplicates when heading appears multiple times at same depth", () => {
+      const tree = pipeline.parse(DUP_DOC);
+      const matches = AstNavigator.findAllMatchingHeadings(tree, "Setup", 2);
+      expect(matches).toHaveLength(2);
+      expect(matches[0]!.depth).toBe(2);
+      expect(matches[1]!.depth).toBe(2);
+    });
+
+    it("matching is case-insensitive", () => {
+      const tree = pipeline.parse(DUP_DOC);
+      const matches = AstNavigator.findAllMatchingHeadings(tree, "setup", 2);
+      expect(matches).toHaveLength(2);
+    });
+
+    it("does not match headings at a different depth", () => {
+      const doc = "## Setup\n\n### Setup\n\nContent.";
+      const tree = pipeline.parse(doc);
+      const matches = AstNavigator.findAllMatchingHeadings(tree, "Setup", 2);
+      expect(matches).toHaveLength(1);
+    });
+  });
 });

@@ -27,7 +27,7 @@ import { VaultIndexer } from "../use-cases/vault-indexer.js";
 import { MarkdownFileRepository } from "../infrastructure/markdown-file-repository.js";
 import { RegexTemplateEngine } from "../infrastructure/regex-template-engine.js";
 import { UnifiedDiffService } from "../infrastructure/diff-service.js";
-import { DomainError, InvalidArgumentError } from "../domain/errors/index.js";
+import { DomainError, InvalidArgumentError, OutlineLimitExceededError, AmbiguousHeadingTargetError } from "../domain/errors/index.js";
 import { OverviewManager } from "../use-cases/overview-manager.js";
 import { VaultStatsComposer } from "../use-cases/vault-stats.js";
 import { VaultOverviewResourceComposer } from "../use-cases/vault-resource-overview.js";
@@ -180,25 +180,28 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("edit", {
     title: "Edit",
     description:
-      `Edit notes safely. Vault scope: ${vaultScope}. Supports AST edits by heading/block ID, freeform line/string replacement, frontmatter_set metadata merges, batch operations (max 50), and dryRun=true unified diff previews. Read vault://overview for editing strategy and conventions.`,
+      `Edit notes safely. Vault scope: ${vaultScope}. Supports AST edits by heading/block ID, freeform line/string replacement, frontmatter_set metadata merges, batch operations (max 50), and dryRun=true unified diff previews. Read vault://overview for editing strategy and conventions.\n\nTIPS: Always use dryRun=true before destructive operations (delete, replace). Use bulk_read for reading 2+ files. Use view.outline before heading-specific edits when unsure of heading names. string_replace requires exact literal match including whitespace/newlines.`,
     inputSchema: {
       path: z.string().optional().describe("Note path (required for single edit)."),
-      operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]).optional().describe("Edit operation (required for single edit)."),
-      content: z.string().optional().describe("Content to apply (required for single edit)."),
+      operation: z.enum(["append", "prepend", "replace", "delete", "line_replace", "string_replace", "frontmatter_set"]).optional().describe("Edit operation (required for single edit). 'delete' removes the full heading section including child headings. 'replace' by default replaces only the body under the heading (heading node preserved). Use replaceMode='section' to replace the heading and all its content."),
+      content: z.string().optional().describe("Content to apply (required for single edit, ignored for delete)."),
       heading: z.string().optional(),
       headingDepth: z.number().optional(),
+      replaceMode: z.enum(["body", "section"]).optional().describe("For replace operation: 'body' (default) preserves the heading node and replaces only body content. 'section' replaces the entire heading section including the heading node and all child headings."),
       blockId: z.string().optional(),
       startLine: z.number().optional(),
       endLine: z.number().optional(),
       searchText: z.string().optional(),
       replaceAll: z.boolean().optional(),
       dryRun: z.boolean().optional().describe("If true, returns a preview of changes as a unified diff without saving to disk."),
+      returnContent: z.enum(["none", "section", "file"]).optional().describe("When set to 'section' or 'file', the response includes the modified content (max 8KB). Defaults to 'none'."),
       operations: z.array(z.object({
         path: z.string(),
-        operation: z.enum(["append", "prepend", "replace", "line_replace", "string_replace", "frontmatter_set"]),
-        content: z.string(),
+        operation: z.enum(["append", "prepend", "replace", "delete", "line_replace", "string_replace", "frontmatter_set"]),
+        content: z.string().optional(),
         heading: z.string().optional(),
         headingDepth: z.number().optional(),
+        replaceMode: z.enum(["body", "section"]).optional(),
         blockId: z.string().optional(),
         startLine: z.number().optional(),
         endLine: z.number().optional(),
@@ -206,7 +209,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         replaceAll: z.boolean().optional(),
       })).optional().describe("For batch mode: array of edit operations (max 50). Executed sequentially, stops on first error."),
     },
-  }, async ({ path: notePath, operation, content, heading, headingDepth, blockId, startLine, endLine, searchText, replaceAll, dryRun, operations }) => {
+  }, async ({ path: notePath, operation, content, heading, headingDepth, replaceMode, blockId, startLine, endLine, searchText, replaceAll, dryRun, returnContent, operations }) => {
     return wrapTool(deps.workflow, "edit", takePrimingContext(), async () => {
       // Helper: update indexes after file write
       // Backlinks synchronously (required for consistency), vectors in background
@@ -241,18 +244,48 @@ export function createMcpServer(deps: McpDependencies): McpServer {
       // ── Single mode — validate required fields ─────────────
       if (!notePath) throw new InvalidArgumentError("path");
       if (!operation) throw new InvalidArgumentError("operation");
-      if (content === undefined) throw new InvalidArgumentError("content");
+      if (content === undefined && operation !== "delete") throw new InvalidArgumentError("content");
 
       const source = await deps.fsAdapter.readNote(notePath);
       const diffService = new UnifiedDiffService();
       const dryRunEditor = new DryRunEditor(deps.fsAdapter, diffService);
 
-      // Helper: finalize edit and update indexes if not dryRun
-      const executeEdit = async (editResult: unknown): Promise<unknown> => {
+      const SIZE_GUARD = 8192;
+
+      const enrichAndFinalize = async (
+        editResult: import("../use-cases/dry-run-edit.js").DryRunEditResponse,
+        newContent: string,
+        targetResolved?: string | undefined,
+      ): Promise<import("../use-cases/dry-run-edit.js").DryRunEditResponse> => {
         if (!(dryRun ?? false)) {
           await syncIndexes(notePath);
         }
-        return editResult;
+        const enriched: import("../use-cases/dry-run-edit.js").DryRunEditResponse = {
+          ...editResult,
+          changed: source !== newContent,
+          operation,
+          path: notePath,
+          ...(targetResolved !== undefined ? { targetResolved } : {}),
+        };
+        const rc = returnContent ?? "none";
+        if (rc === "file") {
+          const fileContent = dryRun ? newContent : await deps.fsAdapter.readNote(notePath);
+          if (fileContent.length > SIZE_GUARD) {
+            enriched.truncated = true;
+            enriched.fileContent = fileContent.slice(0, SIZE_GUARD);
+          } else {
+            enriched.fileContent = fileContent;
+          }
+        } else if (rc === "section") {
+          const sectionContent = newContent;
+          if (sectionContent.length > SIZE_GUARD) {
+            enriched.truncated = true;
+            enriched.modifiedSection = sectionContent.slice(0, SIZE_GUARD);
+          } else {
+            enriched.modifiedSection = sectionContent;
+          }
+        }
+        return enriched;
       };
 
       // ── Freeform operations ─────────────────────────────────────
@@ -260,6 +293,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         if (startLine === undefined || endLine === undefined) {
           throw new InvalidArgumentError("startLine/endLine");
         }
+        if (content === undefined) throw new InvalidArgumentError("content");
         const newContent = FreeformEditor.lineReplace(source, startLine, endLine, content);
         const result = await dryRunEditor.execute({
           path: notePath,
@@ -268,13 +302,14 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           dryRun: dryRun ?? false,
           operationLabel: `line_replace lines ${startLine}-${endLine}`,
         });
-        return executeEdit(result);
+        return enrichAndFinalize(result, newContent);
       }
 
       if (operation === "string_replace") {
         if (!searchText) {
           throw new InvalidArgumentError("searchText");
         }
+        if (content === undefined) throw new InvalidArgumentError("content");
         const newContent = FreeformEditor.stringReplace(source, searchText, content, replaceAll ?? false);
         const result = await dryRunEditor.execute({
           path: notePath,
@@ -283,11 +318,12 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           dryRun: dryRun ?? false,
           operationLabel: "string_replace",
         });
-        return executeEdit(result);
+        return enrichAndFinalize(result, newContent);
       }
 
       // ── Frontmatter operation ──────────────────────────────────
       if (operation === "frontmatter_set") {
+        if (content === undefined) throw new InvalidArgumentError("content");
         const tree = pipeline.parse(source);
         const yamlNode = tree.children.find((node) => node.type === "yaml");
         const parsed = parseFrontmatterPayload(content);
@@ -315,7 +351,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           dryRun: dryRun ?? false,
           operationLabel: "frontmatter_set",
         });
-        return executeEdit(result);
+        return enrichAndFinalize(result, newContent);
       }
 
       // ── AST operations ──────────────────────────────────────────
@@ -323,14 +359,21 @@ export function createMcpServer(deps: McpDependencies): McpServer {
 
       // Build target
       let target: Parameters<typeof AstPatcher.apply>[1]["target"];
+      let targetResolved: string | undefined;
 
       if (blockId) {
         target = { blockId };
       } else if (heading) {
         const depth = headingDepth ?? 2;
 
-        // Fuzzy match the heading title
+        // Check for exact duplicates first — throw before fuzzy matching
         const allHeadings = AstNavigator.findAllHeadings(tree);
+        const exactDuplicates = AstNavigator.findAllMatchingHeadings(tree, heading, depth);
+        if (exactDuplicates.length > 1) {
+          throw new AmbiguousHeadingTargetError(heading, depth, exactDuplicates);
+        }
+
+        // Fuzzy match the heading title
         const candidates = allHeadings
           .filter((h) => h.depth === depth)
           .map((h) => h.title);
@@ -339,6 +382,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           const matched = FuzzyMatcher.bestMatch(heading, candidates, 0.6);
           if (matched) {
             target = { heading: matched.match, depth };
+            targetResolved = matched.match;
           } else {
             target = { heading, depth };
           }
@@ -349,7 +393,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         target = "document";
       }
 
-      AstPatcher.apply(tree, { type: operation, target, content }, pipeline);
+      AstPatcher.apply(tree, { type: operation, target, content: content ?? "", replaceMode }, pipeline);
       const newContent = pipeline.stringify(tree);
 
       const result = await dryRunEditor.execute({
@@ -359,7 +403,7 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         dryRun: dryRun ?? false,
         operationLabel: operation,
       });
-      return executeEdit(result);
+      return enrichAndFinalize(result, newContent, targetResolved);
     });
   });
 
@@ -434,6 +478,17 @@ export function createMcpServer(deps: McpDependencies): McpServer {
           }));
         }
         case "outline": {
+          if (directory) {
+            const files = await deps.fsAdapter.listNotes(directory);
+            if (files.length === 0) throw new InvalidArgumentError("directory (no markdown files found)");
+            if (files.length > 50) throw new OutlineLimitExceededError("Directory outline limit: max 50 files");
+            const results = await Promise.all(files.map(async (filePath) => {
+              const source = await deps.fsAdapter.readNote(filePath);
+              const tree = pipeline.parse(source);
+              return { path: filePath, headings: AstNavigator.findAllHeadings(tree) };
+            }));
+            return results;
+          }
           if (!notePath) throw new InvalidArgumentError("path");
           const source = await deps.fsAdapter.readNote(notePath);
           const tree = pipeline.parse(source);
@@ -694,15 +749,22 @@ async function wrapTool<T>(
       content: [{ type: "text", text: JSON.stringify(response) }],
     };
   } catch (err) {
-    const message =
-      err instanceof DomainError
-        ? `[${err.code}] ${err.message}`
-        : "Internal error occurred";
-    if (!(err instanceof DomainError)) {
-      console.error("Unexpected tool error:", err);
+    if (err instanceof DomainError) {
+      const errorResponse: Record<string, unknown> = {
+        error: err.code,
+        message: err.message,
+      };
+      if (err instanceof AmbiguousHeadingTargetError) {
+        errorResponse["candidates"] = err.candidates;
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(errorResponse) }],
+        isError: true,
+      };
     }
+    console.error("Unexpected tool error:", err);
     return {
-      content: [{ type: "text", text: message }],
+      content: [{ type: "text", text: "Internal error occurred" }],
       isError: true,
     };
   }

@@ -182,3 +182,42 @@ export class InvalidConfigError extends DomainError {
     this.name = "InvalidConfigError";
   }
 }
+
+// ── Edit UX / Heading-operation errors ───────────────────────────
+
+/** Thrown when a heading target is ambiguous due to duplicate headings. */
+export class AmbiguousHeadingTargetError extends DomainError {
+  public readonly candidates: ReadonlyArray<{ title: string; depth: number; index: number }>;
+
+  constructor(
+    title: string,
+    depth: number,
+    candidates: ReadonlyArray<{ title: string; depth: number; index: number }>,
+  ) {
+    super(
+      "AMBIGUOUS_HEADING_TARGET",
+      `Ambiguous heading target: "${title}" at depth ${depth} matches ${candidates.length} headings. ` +
+        `Use blockId targeting to disambiguate. ` +
+        `Add block IDs like "^my-id" to the relevant heading sections first, ` +
+        `then reference via blockId instead of heading text.`,
+    );
+    this.name = "AmbiguousHeadingTargetError";
+    this.candidates = candidates;
+  }
+}
+
+/** Thrown when a delete target is structurally unsafe (e.g., would remove the entire document). */
+export class UnsafeDeleteTargetError extends DomainError {
+  constructor(detail: string) {
+    super("UNSAFE_DELETE_TARGET", `Unsafe delete target: ${detail}`);
+    this.name = "UnsafeDeleteTargetError";
+  }
+}
+
+/** Thrown when directory outline exceeds configured file or heading limits. */
+export class OutlineLimitExceededError extends DomainError {
+  constructor(detail: string) {
+    super("OUTLINE_LIMIT_EXCEEDED", `Outline limit exceeded: ${detail}`);
+    this.name = "OutlineLimitExceededError";
+  }
+}

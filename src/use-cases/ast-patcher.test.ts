@@ -204,3 +204,144 @@ describe("AstPatcher — document-level", () => {
     expect(prependedIdx).toBeLessThan(headingIdx);
   });
 });
+
+// ── replaceMode: section ───────────────────────────────────────────
+
+describe("AstPatcher — replaceMode: section", () => {
+  const SECTION_DOC = [
+    "# Title",
+    "",
+    "## Parent",
+    "",
+    "Parent body.",
+    "",
+    "### Child",
+    "",
+    "Child body.",
+    "",
+    "## Sibling",
+    "",
+    "Sibling body.",
+  ].join("\n");
+
+  it("replaceMode body (default) preserves heading and removes body + child headings", () => {
+    const result = applyPatch(SECTION_DOC, {
+      type: "replace",
+      target: { heading: "Parent", depth: 2 },
+      content: "New parent body.",
+    });
+    expect(result).toContain("## Parent");
+    expect(result).toContain("New parent body.");
+    expect(result).not.toContain("Parent body.");
+    expect(result).not.toContain("### Child");
+    expect(result).toContain("## Sibling");
+  });
+
+  it("replaceMode section replaces heading + body + child headings", () => {
+    const result = applyPatch(SECTION_DOC, {
+      type: "replace",
+      target: { heading: "Parent", depth: 2 },
+      content: "## New Parent\n\nNew body.",
+      replaceMode: "section",
+    });
+    expect(result).toContain("## New Parent");
+    expect(result).toContain("New body.");
+    expect(result).not.toContain("## Parent\n");
+    expect(result).not.toContain("### Child");
+    expect(result).not.toContain("Child body.");
+    expect(result).toContain("## Sibling");
+  });
+
+  it("replaceMode section leaves next sibling heading untouched", () => {
+    const result = applyPatch(SECTION_DOC, {
+      type: "replace",
+      target: { heading: "Parent", depth: 2 },
+      content: "## Replacement\n\nReplaced.",
+      replaceMode: "section",
+    });
+    expect(result).toContain("## Sibling");
+    expect(result).toContain("Sibling body.");
+  });
+});
+
+// ── delete operation ───────────────────────────────────────────────
+
+describe("AstPatcher — delete operation", () => {
+  const DELETE_DOC = [
+    "# Title",
+    "",
+    "## Keep",
+    "",
+    "Keep body.",
+    "",
+    "## Delete Me",
+    "",
+    "Delete body.",
+    "",
+    "### Child",
+    "",
+    "Child body.",
+    "",
+    "## Keep Too",
+    "",
+    "Keep too body.",
+  ].join("\n");
+
+  it("deletes heading + body + child headings", () => {
+    const result = applyPatch(DELETE_DOC, {
+      type: "delete",
+      target: { heading: "Delete Me", depth: 2 },
+      content: "",
+    });
+    expect(result).toContain("## Keep");
+    expect(result).toContain("Keep body.");
+    expect(result).not.toContain("## Delete Me");
+    expect(result).not.toContain("Delete body.");
+    expect(result).not.toContain("### Child");
+    expect(result).not.toContain("Child body.");
+    expect(result).toContain("## Keep Too");
+    expect(result).toContain("Keep too body.");
+  });
+
+  it("deletes last heading section without disturbing preceding content", () => {
+    const doc = "## First\n\nFirst body.\n\n## Last\n\nLast body.";
+    const result = applyPatch(doc, {
+      type: "delete",
+      target: { heading: "Last", depth: 2 },
+      content: "",
+    });
+    expect(result).toContain("## First");
+    expect(result).toContain("First body.");
+    expect(result).not.toContain("## Last");
+    expect(result).not.toContain("Last body.");
+  });
+
+  it("deletes empty heading section (heading only, no body)", () => {
+    const doc = "## Empty\n\n## Next\n\nNext body.";
+    const result = applyPatch(doc, {
+      type: "delete",
+      target: { heading: "Empty", depth: 2 },
+      content: "",
+    });
+    expect(result).not.toContain("## Empty");
+    expect(result).toContain("## Next");
+  });
+
+  it("throws HeadingNotFoundError when heading does not exist", () => {
+    expect(() =>
+      applyPatch(DELETE_DOC, {
+        type: "delete",
+        target: { heading: "Nonexistent", depth: 2 },
+        content: "",
+      })
+    ).toThrow(HeadingNotFoundError);
+  });
+
+  it("throws UnsafeDeleteTargetError when delete targets document", () => {
+    const pipeline = new MarkdownPipeline();
+    const tree = pipeline.parse("# Title\n\nSome content.");
+    expect(() =>
+      AstPatcher.apply(tree, { type: "delete", target: "document", content: "" }, pipeline)
+    ).toThrow(expect.objectContaining({ code: "UNSAFE_DELETE_TARGET" }));
+  });
+});

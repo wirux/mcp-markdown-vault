@@ -1034,3 +1034,205 @@ describe("MCP Server — system tool — overview actions", () => {
     expect(parsed.result.updated_at).not.toBeNull();
   });
 });
+
+describe("MCP Server — tool schema and description pins", () => {
+  it("edit tool description mentions dryRun", async () => {
+    const result = await client.listTools();
+    const editTool = result.tools.find((t) => t.name === "edit");
+    expect(editTool?.description).toContain("dryRun");
+  });
+
+  it("edit tool description mentions batch operations", async () => {
+    const result = await client.listTools();
+    const editTool = result.tools.find((t) => t.name === "edit");
+    expect(editTool?.description).toContain("batch");
+  });
+
+  it("edit tool inputSchema includes dryRun field", async () => {
+    const result = await client.listTools();
+    const editTool = result.tools.find((t) => t.name === "edit");
+    const schema = editTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+    expect(schema?.properties).toHaveProperty("dryRun");
+  });
+
+  it("edit tool inputSchema includes operations field for batch", async () => {
+    const result = await client.listTools();
+    const editTool = result.tools.find((t) => t.name === "edit");
+    const schema = editTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+    expect(schema?.properties).toHaveProperty("operations");
+  });
+
+  it("view tool description mentions outline action", async () => {
+    const result = await client.listTools();
+    const viewTool = result.tools.find((t) => t.name === "view");
+    expect(viewTool?.description).toContain("outline");
+  });
+
+  it("view tool description mentions bulk_read", async () => {
+    const result = await client.listTools();
+    const viewTool = result.tools.find((t) => t.name === "view");
+    expect(viewTool?.description).toContain("bulk_read");
+  });
+
+  it("view tool inputSchema includes path field", async () => {
+    const result = await client.listTools();
+    const viewTool = result.tools.find((t) => t.name === "view");
+    const schema = viewTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+    expect(schema?.properties).toHaveProperty("path");
+  });
+
+  it("view tool inputSchema includes directory field", async () => {
+    const result = await client.listTools();
+    const viewTool = result.tools.find((t) => t.name === "view");
+    const schema = viewTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+    expect(schema?.properties).toHaveProperty("directory");
+  });
+
+  it("workflow tool description mentions optional session state", async () => {
+    const result = await client.listTools();
+    const wfTool = result.tools.find((t) => t.name === "workflow");
+    expect(wfTool?.description).toContain("optional");
+  });
+
+  it("system tool description mentions reindex", async () => {
+    const result = await client.listTools();
+    const sysTool = result.tools.find((t) => t.name === "system");
+    expect(sysTool?.description).toContain("reindex");
+  });
+
+  it("view outline with file path returns HeadingInfo array (file mode pinned)", async () => {
+    const mdPath = `${tmpDir}/pin-outline.md`;
+    await fs.writeFile(mdPath, "# Title\n\n## Section\n\nContent.\n");
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "outline", path: "pin-outline.md" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as { result: Array<{ title: string; depth: number }> };
+    expect(Array.isArray(parsed.result)).toBe(true);
+    expect(parsed.result[0]).toHaveProperty("title");
+    expect(parsed.result[0]).toHaveProperty("depth");
+  });
+
+  it("view outline with directory returns per-file heading arrays", async () => {
+    await fs.mkdir(`${tmpDir}/dir-outline`, { recursive: true });
+    await fs.writeFile(`${tmpDir}/dir-outline/alpha.md`, "# Alpha\n\n## Sub\n\nContent.\n");
+    await fs.writeFile(`${tmpDir}/dir-outline/beta.md`, "# Beta\n\nContent.\n");
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "outline", directory: "dir-outline" },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as { result: Array<{ path: string; headings: Array<{ title: string; depth: number }> }> };
+    expect(Array.isArray(parsed.result)).toBe(true);
+    expect(parsed.result).toHaveLength(2);
+    expect(parsed.result[0]).toHaveProperty("path");
+    expect(parsed.result[0]).toHaveProperty("headings");
+    expect(Array.isArray(parsed.result[0]!.headings)).toBe(true);
+    expect(parsed.result[0]!.headings[0]).toHaveProperty("title");
+  });
+
+  it("view outline with empty directory returns error", async () => {
+    await fs.mkdir(`${tmpDir}/dir-outline-empty`, { recursive: true });
+    const result = await client.callTool({
+      name: "view",
+      arguments: { action: "outline", directory: "dir-outline-empty" },
+    });
+    expect(result.isError).toBe(true);
+  });
+});
+
+describe("MCP Server — structured edit response fields", () => {
+  it("single append returns changed=true, operation, and path fields", async () => {
+    const mdPath = `${tmpDir}/structured-edit.md`;
+    await fs.writeFile(mdPath, "# Hello\n\nOriginal content.\n");
+
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "structured-edit.md",
+        operation: "append",
+        content: "Appended line.",
+      },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { message: string; changed?: boolean; operation?: string; path?: string };
+    };
+    expect(parsed.result.changed).toBe(true);
+    expect(parsed.result.operation).toBe("append");
+    expect(parsed.result.path).toBe("structured-edit.md");
+  });
+
+  it("single replace returns changed=true", async () => {
+    const mdPath = `${tmpDir}/replace-test.md`;
+    await fs.writeFile(mdPath, "# Title\n\n## Section\n\nOld content.\n");
+
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "replace-test.md",
+        operation: "replace",
+        heading: "Section",
+        headingDepth: 2,
+        content: "New content.",
+      },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { changed?: boolean; operation?: string; path?: string };
+    };
+    expect(parsed.result.changed).toBe(true);
+    expect(parsed.result.operation).toBe("replace");
+    expect(parsed.result.path).toBe("replace-test.md");
+  });
+
+  it("returnContent=file returns fileContent in response", async () => {
+    const mdPath = `${tmpDir}/rc-file.md`;
+    await fs.writeFile(mdPath, "# File\n\nContent here.\n");
+
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "rc-file.md",
+        operation: "append",
+        content: "Extra line.",
+        returnContent: "file",
+      },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { fileContent?: string; changed?: boolean };
+    };
+    expect(typeof parsed.result.fileContent).toBe("string");
+    expect(parsed.result.fileContent).toContain("Extra line.");
+    expect(parsed.result.changed).toBe(true);
+  });
+
+  it("returnContent=section returns modifiedSection in response", async () => {
+    const mdPath = `${tmpDir}/rc-section.md`;
+    await fs.writeFile(mdPath, "# Doc\n\nDoc content.\n");
+
+    const result = await client.callTool({
+      name: "edit",
+      arguments: {
+        path: "rc-section.md",
+        operation: "prepend",
+        content: "Prepended.",
+        returnContent: "section",
+      },
+    });
+    const content = result.content as Array<{ type: string; text: string }>;
+    const parsed = JSON.parse(content[0]!.text) as {
+      result: { modifiedSection?: string };
+    };
+    expect(typeof parsed.result.modifiedSection).toBe("string");
+  });
+
+  it("edit tool inputSchema includes returnContent field", async () => {
+    const result = await client.listTools();
+    const editTool = result.tools.find((t) => t.name === "edit");
+    const schema = editTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+    expect(schema?.properties).toHaveProperty("returnContent");
+  });
+});

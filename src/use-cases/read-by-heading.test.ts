@@ -103,6 +103,42 @@ describe("ReadByHeadingUseCase", () => {
     expect(result.content).toBe("");
   });
 
+  it("returns suggestions when heading is not found but similar headings exist", async () => {
+    const useCase = new ReadByHeadingUseCase(
+      mockRepo(DOC_WITH_TWO_SECTIONS),
+      pipeline,
+    );
+
+    const result = await useCase.execute({
+      path: "note.md",
+      heading: "Setip",
+      headingDepth: 2,
+    });
+
+    expect(result.found).toBe(false);
+    expect(result.content).toBe("");
+    expect(result.suggestions).toContain("Setup");
+    expect(result.guidance).toContain("view.outline");
+  });
+
+  it("returns empty suggestions and guidance when heading is completely missing", async () => {
+    const useCase = new ReadByHeadingUseCase(
+      mockRepo(DOC_WITH_TWO_SECTIONS),
+      pipeline,
+    );
+
+    const result = await useCase.execute({
+      path: "note.md",
+      heading: "ZebraXYZZZ",
+      headingDepth: 2,
+    });
+
+    expect(result.found).toBe(false);
+    expect(result.suggestions).toBeDefined();
+    expect(Array.isArray(result.suggestions)).toBe(true);
+    expect(result.guidance).toContain("view.outline");
+  });
+
   it("returns content to EOF when heading is the last section", async () => {
     const useCase = new ReadByHeadingUseCase(
       mockRepo(DOC_HEADING_AT_END),

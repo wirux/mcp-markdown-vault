@@ -3,6 +3,7 @@ import { AstNavigator } from "./ast-navigation.js";
 import {
   HeadingNotFoundError,
   BlockNotFoundError,
+  UnsafeDeleteTargetError,
 } from "../domain/errors/index.js";
 import type { MarkdownPipeline } from "./markdown-pipeline.js";
 
@@ -18,30 +19,22 @@ export interface BlockTarget {
 }
 
 export interface PatchOperation {
-  type: "append" | "prepend" | "replace";
+  type: "append" | "prepend" | "replace" | "delete";
   target: HeadingTarget | BlockTarget | "document";
-  /** Raw markdown to inject. Parsed into AST nodes before splicing. */
   content: string;
+  replaceMode?: "body" | "section" | undefined;
 }
 
 // ── Patcher ────────────────────────────────────────────────────────
 
-/**
- * Surgical AST patcher — mutates the tree in place.
- *
- * Supports append/prepend/replace targeting:
- * - A heading section (by title + depth)
- * - A block ID (^block-id)
- * - The entire document
- */
 export class AstPatcher {
   static apply(tree: Root, op: PatchOperation, pipeline: MarkdownPipeline): void {
-    const contentNodes = pipeline.parse(op.content).children;
+    const contentNodes = op.type !== "delete" ? pipeline.parse(op.content).children : [];
 
     if (op.target === "document") {
       AstPatcher.applyDocument(tree, op.type, contentNodes);
     } else if ("heading" in op.target) {
-      AstPatcher.applyHeading(tree, op.type, op.target, contentNodes);
+      AstPatcher.applyHeading(tree, op.type, op.target, contentNodes, op.replaceMode ?? "body");
     } else {
       AstPatcher.applyBlock(tree, op.type, op.target, contentNodes);
     }
@@ -57,7 +50,6 @@ export class AstPatcher {
         tree.children.push(...nodes);
         break;
       case "prepend": {
-        // Insert after frontmatter if present
         const insertAt =
           tree.children.length > 0 && tree.children[0]!.type === "yaml"
             ? 1
@@ -68,6 +60,11 @@ export class AstPatcher {
       case "replace":
         tree.children = nodes;
         break;
+      case "delete":
+        throw new UnsafeDeleteTargetError(
+          "Cannot delete entire document via edit.delete — use vault.delete to remove files",
+        );
+        break;
     }
   }
 
@@ -76,6 +73,7 @@ export class AstPatcher {
     type: PatchOperation["type"],
     target: HeadingTarget,
     nodes: RootContent[],
+    replaceMode: "body" | "section",
   ): void {
     const range = AstNavigator.getHeadingRange(tree, target.heading, target.depth);
     if (!range) {
@@ -84,19 +82,30 @@ export class AstPatcher {
 
     switch (type) {
       case "append":
-        // Insert before the end of the section
         tree.children.splice(range.endIndex, 0, ...nodes);
         break;
       case "prepend":
-        // Insert right after the heading node itself
         tree.children.splice(range.startIndex + 1, 0, ...nodes);
         break;
       case "replace":
-        // Remove everything in the section except the heading, then insert
+        if (replaceMode === "section") {
+          tree.children.splice(
+            range.startIndex,
+            range.endIndex - range.startIndex,
+            ...nodes,
+          );
+        } else {
+          tree.children.splice(
+            range.startIndex + 1,
+            range.endIndex - range.startIndex - 1,
+            ...nodes,
+          );
+        }
+        break;
+      case "delete":
         tree.children.splice(
-          range.startIndex + 1,
-          range.endIndex - range.startIndex - 1,
-          ...nodes,
+          range.startIndex,
+          range.endIndex - range.startIndex,
         );
         break;
     }
@@ -122,6 +131,9 @@ export class AstPatcher {
         break;
       case "replace":
         tree.children.splice(loc.index, 1, ...nodes);
+        break;
+      case "delete":
+        tree.children.splice(loc.index, 1);
         break;
     }
   }

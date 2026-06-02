@@ -7,3 +7,4 @@ coverage/
 .claude/
 my-vault/
 docker-compose.override.yml
+.sisyphus
