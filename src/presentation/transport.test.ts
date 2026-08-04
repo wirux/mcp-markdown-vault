@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server as HttpServer } from "node:http";
+import { PassThrough } from "node:stream";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { parseTransportType, createSseApp } from "./transport.js";
+import {
+  parseTransportType,
+  createSseApp,
+  registerParentExitShutdown,
+} from "./transport.js";
 
 function createMockServerFactory() {
   // Replicate real Protocol.connect() behavior: it calls transport.start()
@@ -268,5 +273,57 @@ describe("createSseApp with auth", () => {
     );
     // 404 = auth passed, session not found (expected)
     expect(res.status).toBe(404);
+  });
+});
+
+describe("registerParentExitShutdown", () => {
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  it("shuts down when the host closes stdin (EOF)", async () => {
+    const channel = new PassThrough();
+    const shutdown = vi.fn();
+
+    registerParentExitShutdown("stdio", shutdown, channel);
+    channel.end();
+    await settle();
+
+    expect(shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it("shuts down only once when both 'end' and 'close' fire", async () => {
+    const channel = new PassThrough();
+    const shutdown = vi.fn();
+
+    registerParentExitShutdown("stdio", shutdown, channel);
+    channel.end();
+    channel.destroy();
+    await settle();
+
+    expect(shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not register under sse, where the process outlives clients", async () => {
+    const channel = new PassThrough();
+    const shutdown = vi.fn();
+
+    registerParentExitShutdown("sse", shutdown, channel);
+    channel.end();
+    channel.destroy();
+    await settle();
+
+    expect(shutdown).not.toHaveBeenCalled();
+  });
+
+  it("resumes the stream so that EOF is actually delivered", () => {
+    const channel = new PassThrough();
+    const resume = vi.spyOn(channel, "resume");
+
+    registerParentExitShutdown("stdio", vi.fn(), channel);
+
+    expect(resume).toHaveBeenCalled();
   });
 });
