@@ -166,3 +166,51 @@ export async function startTransport(
     },
   };
 }
+
+/**
+ * Minimal shape of the channel that ties us to the MCP host.
+ *
+ * Structural on purpose: production passes `process.stdin`, tests pass a
+ * `PassThrough`.
+ */
+export interface ParentChannel {
+  on(event: "end" | "close", listener: () => void): unknown;
+  resume(): unknown;
+}
+
+/**
+ * Exit when the MCP host goes away.
+ *
+ * Under stdio the host owns our stdin. If it dies without sending SIGTERM —
+ * killed, crashed, or simply exited without reaping children — no signal ever
+ * reaches us, and the process would linger forever as an orphan holding the
+ * embedding model resident. EOF on stdin is the only reliable indication that
+ * the host is gone.
+ *
+ * Deliberately not registered for sse: there the process is a long-lived
+ * service that must outlive individual clients.
+ */
+export function registerParentExitShutdown(
+  type: TransportType,
+  shutdown: () => void | Promise<void>,
+  channel: ParentChannel = process.stdin,
+): void {
+  if (type !== "stdio") {
+    return;
+  }
+
+  let triggered = false;
+  const onParentGone = (): void => {
+    if (triggered) {
+      return;
+    }
+    triggered = true;
+    void shutdown();
+  };
+
+  channel.on("end", onParentGone);
+  channel.on("close", onParentGone);
+
+  // Without an active reader the stream stays paused and 'end' never fires.
+  channel.resume();
+}

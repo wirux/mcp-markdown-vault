@@ -24,6 +24,7 @@ import { createMcpServer, type McpDependencies } from "./presentation/mcp-tools.
 import {
   parseTransportType,
   startTransport,
+  registerParentExitShutdown,
 } from "./presentation/transport.js";
 import {
   parseVaultContextConfig,
@@ -278,6 +279,7 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  registerParentExitShutdown(transportType, shutdown);
 
   // Periodic flush every 60 seconds
   setInterval(async () => {
