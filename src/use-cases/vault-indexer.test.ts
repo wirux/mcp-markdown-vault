@@ -136,6 +136,20 @@ describe("VaultIndexer", () => {
       );
       expect(results.some((r) => r.text.includes("V2"))).toBe(true);
     });
+
+    it("skips re-embedding when the note content is unchanged", async () => {
+      const notePath = path.join(tmpDir, "stable.md");
+      await fs.writeFile(notePath, "# Stable\n\nNever changing content.\n");
+      await indexer.indexFile("stable.md");
+      const chunksAfterFirst = await store.size();
+      expect(chunksAfterFirst).toBeGreaterThan(0);
+
+      embedder.embedCalls.length = 0;
+      await indexer.indexFile("stable.md");
+
+      expect(embedder.embedCalls).toHaveLength(0);
+      expect(await store.size()).toBe(chunksAfterFirst);
+    });
   });
 
   describe("onFileIndexed callback", () => {

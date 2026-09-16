@@ -144,6 +144,22 @@ export class VaultIndexer {
       return;
     }
 
+    const existing = this.store.getFileChunks?.(relativePath);
+    if (
+      existing !== undefined &&
+      existing.length === chunks.length &&
+      chunks.every((chunk, i) => {
+        const prev = existing[i];
+        return (
+          prev !== undefined &&
+          prev.text === chunk.text &&
+          prev.headingPath.join("\u0000") === chunk.headingPath.join("\u0000")
+        );
+      })
+    ) {
+      return;
+    }
+
     const vectorChunks: VectorChunk[] = [];
     for (const chunk of chunks) {
       const vector = await this.embedder.embed(chunk.text);

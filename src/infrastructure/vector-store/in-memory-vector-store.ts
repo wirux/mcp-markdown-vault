@@ -66,6 +66,12 @@ export class InMemoryVectorStore implements IVectorStore {
     return this.docs.has(docPath);
   }
 
+  getFileChunks(
+    docPath: string,
+  ): Array<Pick<VectorChunk, "text" | "headingPath">> | undefined {
+    return this.docs.get(docPath);
+  }
+
   async size(): Promise<number> {
     return this.docs.size;
   }

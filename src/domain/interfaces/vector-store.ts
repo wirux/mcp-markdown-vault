@@ -26,6 +26,15 @@ export interface IVectorStore {
    */
   has(docPath: string): Promise<boolean>;
 
+  /**
+   * Return the chunks currently stored for a document, if the store
+   * supports cheap read-back. Used to skip re-embedding unchanged notes.
+   * Implementations may omit this; indexing then always re-embeds.
+   */
+  getFileChunks?(
+    docPath: string,
+  ): Array<Pick<VectorChunk, "text" | "headingPath">> | undefined;
+
   /** Number of documents currently indexed. */
   size(): Promise<number>;
 
