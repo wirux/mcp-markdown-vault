@@ -81,6 +81,8 @@ All file operations route through `SafePath` value object — prevents path trav
 | `VECTOR_STORE_RESET` | `false` | Set to `true` to auto-delete a mismatched vector index on startup and rebuild from scratch. |
 | `MCP_AUTH_TOKEN` | *(unset)* | Bearer token for SSE transport auth. If set, all SSE endpoints require `Authorization: Bearer <token>`. |
 
+Vector stores may implement the optional `IVectorStore.getFileChunks` read-back; stores that omit it (e.g. a Qdrant adapter) always re-embed on re-index.
+
 ## Conventions
 
 ### Layer Dependencies (strictly enforced)

@@ -135,7 +135,10 @@ export class VaultIndexer {
 
   // ── Single-file operations ─────────────────────────────────────
 
-  async indexFile(relativePath: string): Promise<void> {
+  async indexFile(
+    relativePath: string,
+    options?: { force?: boolean },
+  ): Promise<void> {
     const content = await this.fs.readNote(relativePath);
 
     const chunks = this.chunker.chunk(content);
@@ -144,20 +147,27 @@ export class VaultIndexer {
       return;
     }
 
-    const existing = this.store.getFileChunks?.(relativePath);
-    if (
-      existing !== undefined &&
-      existing.length === chunks.length &&
-      chunks.every((chunk, i) => {
-        const prev = existing[i];
-        return (
-          prev !== undefined &&
-          prev.text === chunk.text &&
-          prev.headingPath.join("\u0000") === chunk.headingPath.join("\u0000")
-        );
-      })
-    ) {
-      return;
+    if (!options?.force) {
+      const existing = await this.store.getFileChunks?.(relativePath);
+      if (
+        existing !== undefined &&
+        existing.length === chunks.length &&
+        chunks.every((chunk, i) => {
+          const prev = existing[i];
+          return (
+            prev !== undefined &&
+            prev.text === chunk.text &&
+            prev.headingPath.join("\u0000") ===
+              chunk.headingPath.join("\u0000")
+          );
+        })
+      ) {
+        // Chunk-invisible edits (e.g. frontmatter-only changes) still need
+        // to reach subscribers (backlink index) even though nothing is
+        // re-embedded.
+        this.notifyFileIndexed(relativePath, content);
+        return;
+      }
     }
 
     const vectorChunks: VectorChunk[] = [];
@@ -185,11 +195,11 @@ export class VaultIndexer {
 
   // ── Bulk indexing ──────────────────────────────────────────────
 
-  async indexAll(): Promise<void> {
+  async indexAll(options?: { force?: boolean }): Promise<void> {
     const files = await this.fs.listNotes();
     for (const file of files) {
       try {
-        await this.indexFile(file);
+        await this.indexFile(file, options);
       } catch {
         // Skip files that fail to index and continue with the rest.
       }

@@ -141,14 +141,68 @@ describe("VaultIndexer", () => {
       const notePath = path.join(tmpDir, "stable.md");
       await fs.writeFile(notePath, "# Stable\n\nNever changing content.\n");
       await indexer.indexFile("stable.md");
-      const chunksAfterFirst = await store.size();
-      expect(chunksAfterFirst).toBeGreaterThan(0);
+      const docsAfterFirst = await store.size();
+      expect(docsAfterFirst).toBeGreaterThan(0);
 
       embedder.embedCalls.length = 0;
       await indexer.indexFile("stable.md");
 
       expect(embedder.embedCalls).toHaveLength(0);
-      expect(await store.size()).toBe(chunksAfterFirst);
+      expect(await store.size()).toBe(docsAfterFirst);
+    });
+
+    it("skips re-embedding on frontmatter-only edits", async () => {
+      const notePath = path.join(tmpDir, "props.md");
+      await fs.writeFile(
+        notePath,
+        "---\ntags: [a]\n---\n\n# Props\n\nBody text.\n",
+      );
+      await indexer.indexFile("props.md");
+
+      embedder.embedCalls.length = 0;
+      await fs.writeFile(
+        notePath,
+        '---\ntags: [a]\nrelated: "[[other]]"\n---\n\n# Props\n\nBody text.\n',
+      );
+      await indexer.indexFile("props.md");
+
+      // The chunker ignores frontmatter, so the chunks are identical and
+      // no embedding happens.
+      expect(embedder.embedCalls).toHaveLength(0);
+    });
+
+    it("re-embeds unchanged notes when force is set", async () => {
+      const notePath = path.join(tmpDir, "forced.md");
+      await fs.writeFile(notePath, "# Forced\n\nBody.\n");
+      await indexer.indexFile("forced.md");
+
+      embedder.embedCalls.length = 0;
+      await indexer.indexFile("forced.md", { force: true });
+
+      expect(embedder.embedCalls).toHaveLength(1);
+    });
+
+    it("re-embeds when the store does not implement getFileChunks", async () => {
+      const noReadBack = Object.assign(
+        Object.create(Object.getPrototypeOf(store)),
+        store,
+        { getFileChunks: undefined },
+      );
+      const fallbackIndexer = new VaultIndexer(
+        tmpDir,
+        noReadBack as unknown as InMemoryVectorStore,
+        embedder,
+        watcher,
+        fsAdapter,
+      );
+      const notePath = path.join(tmpDir, "fallback.md");
+      await fs.writeFile(notePath, "# Fallback\n\nBody.\n");
+      await fallbackIndexer.indexFile("fallback.md");
+
+      embedder.embedCalls.length = 0;
+      await fallbackIndexer.indexFile("fallback.md");
+
+      expect(embedder.embedCalls).toHaveLength(1);
     });
   });
 
@@ -168,6 +222,33 @@ describe("VaultIndexer", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]!.path).toBe("cb.md");
       expect(calls[0]!.content).toContain("Test content.");
+    });
+
+    it("invokes callback even when embedding is skipped", async () => {
+      const calls: Array<{ path: string; content: string }> = [];
+      indexer.addOnFileIndexed((relPath, content) => {
+        calls.push({ path: relPath, content });
+      });
+
+      await fs.writeFile(
+        path.join(tmpDir, "cb-skip.md"),
+        "# Callback Skip\n\nOriginal.\n",
+      );
+      await indexer.indexFile("cb-skip.md");
+      expect(calls).toHaveLength(1);
+
+      await fs.writeFile(
+        path.join(tmpDir, "cb-skip.md"),
+        '---\nrelated: "[[cb]]"\n---\n\n# Callback Skip\n\nOriginal.\n',
+      );
+      embedder.embedCalls.length = 0;
+      await indexer.indexFile("cb-skip.md");
+
+      // Frontmatter-only edit: no re-embedding, but subscribers (e.g. the
+      // backlink index) still see the new content.
+      expect(embedder.embedCalls).toHaveLength(0);
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.content).toContain("[[cb]]");
     });
 
     it("invokes onFileRemoved callback after removing a file", async () => {
