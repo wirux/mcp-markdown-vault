@@ -214,6 +214,18 @@ export class PersistedFlatVectorStore implements IVectorStore {
     return this.docs.has(docPath);
   }
 
+  async getFileChunks(
+    docPath: string,
+  ): Promise<Array<Pick<VectorChunk, "text" | "headingPath">> | undefined> {
+    const chunks = this.docs.get(docPath);
+    // Return a projection so callers never hold the live internal arrays
+    // (including the Float32Array vectors).
+    return chunks?.map((c) => ({
+      text: c.text,
+      headingPath: [...c.headingPath],
+    }));
+  }
+
   async size(): Promise<number> {
     let s = 0;
     for (const chunks of this.docs.values()) {

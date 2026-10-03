@@ -620,7 +620,9 @@ export function createMcpServer(deps: McpDependencies): McpServer {
         }
         case "reindex": {
           if (deps.indexer) {
-            deps.indexer.indexAll()
+            // Explicit reindex stays a repair tool: force re-embeds even
+            // unchanged notes so corrupted vectors can be rebuilt.
+            deps.indexer.indexAll({ force: true })
               .then(async () => {
                 if (deps.backlinkIndex) {
                   const allFiles = await deps.fsAdapter.listNotes();
