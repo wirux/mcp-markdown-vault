@@ -59,7 +59,7 @@
 | 🧠 | **Semantic search** | Hybrid vector + lexical search with background auto-indexing |
 | ⚡ | **Zero-setup embeddings** | Built-in local embeddings via `@huggingface/transformers` — Ollama optional |
 | 🔄 | **Workflow tracking** | Petri net state machine with contextual LLM hints |
-| 🌐 | **Dual transport** | Stdio (single client) or SSE over HTTP (multi-client, Docker-friendly) |
+| 🌐 | **Dual transport** | Stdio (single client) or HTTP (multi-client: SSE streams plus stateless Streamable HTTP, Docker-friendly) |
 | ✏️ | **Freeform editing** | Line-range replacement and string find/replace as AST fallback |
 | 🏷️ | **Frontmatter management** | AST-based read and update of YAML frontmatter — safely manage tags, statuses, and metadata without corrupting file structure |
 | 👀 | **Dry-run / diff preview** | Preview any edit operation as a unified diff without saving — set `dryRun=true` on any edit action |
@@ -186,12 +186,14 @@ VAULT_PATH=/path/to/your/vault node dist/index.js
 
 - `GET /sse` — establishes an SSE stream (one per client)
 - `POST /messages?sessionId=...` — receives JSON-RPC messages
+- `POST /mcp` — stateless Streamable HTTP endpoint (one request per JSON-RPC message, no session IDs), for clients that cannot use SSE streams
+- `GET /mcp`, `DELETE /mcp` — answer `405`; this server has no use for the optional server-to-client stream
 
 ```bash
 MCP_TRANSPORT_TYPE=sse PORT=3000 VAULT_PATH=/path/to/vault npx @wirux/mcp-markdown-vault
 ```
 
-Each SSE client gets its own workflow state. Shared resources (vault, vector index, embedder) are reused across all connections.
+Each SSE client gets its own workflow state. Shared resources (vault, vector index, embedder) are reused across all connections, and every Streamable HTTP request gets a fresh server instance the same way.
 
 ---
 
@@ -216,7 +218,7 @@ The server selects an embedding provider automatically:
 | `VAULT_PATH` | `/vault` | Markdown vault directory |
 | `VAULT_CONTEXT_MODE` | `assisted` | Vault orientation mode: `assisted` (host LLM/agent calls `prepare_overview` to gather evidence, then generates prose and calls `save_overview`) or `manual` (you author `meta/overview.md` yourself and the server does not overwrite it). `auto` is a deprecated alias for `assisted`. |
 | `VAULT_CONTEXT` | *(deprecated)* | Deprecated and ignored. Use `VAULT_CONTEXT_MODE` instead. |
-| `MCP_TRANSPORT_TYPE` | `stdio` | `stdio` (single client) or `sse` (multi-client HTTP) |
+| `MCP_TRANSPORT_TYPE` | `stdio` | `stdio` (single client) or `sse` (multi-client HTTP: SSE streams + Streamable HTTP on `/mcp`) |
 | `PORT` | `3000` | HTTP port (SSE mode only) |
 | `OLLAMA_URL` | *(unset)* | Set to enable Ollama embeddings |
 | `OLLAMA_MODEL` | `nomic-embed-text` | Ollama embedding model name |

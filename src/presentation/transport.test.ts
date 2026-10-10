@@ -2,6 +2,9 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server as HttpServer } from "node:http";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer as RealMcpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { parseTransportType, createSseApp } from "./transport.js";
 
 function createMockServerFactory() {
@@ -268,5 +271,143 @@ describe("createSseApp with auth", () => {
     );
     // 404 = auth passed, session not found (expected)
     expect(res.status).toBe(404);
+  });
+});
+
+describe("streamable HTTP endpoint (/mcp)", () => {
+  const openServers: HttpServer[] = [];
+
+  afterEach(async () => {
+    for (const s of openServers) {
+      await new Promise<void>((resolve) => s.close(() => resolve()));
+    }
+    openServers.length = 0;
+  });
+
+  function listen(options?: { authToken?: string }) {
+    const serverFactory = vi.fn(() => {
+      const server = new RealMcpServer(
+        { name: "test-server", version: "1.0.0" },
+      );
+      void server.registerTool(
+        "echo",
+        { description: "echo tool for transport tests" },
+        async () => ({ content: [{ type: "text", text: "echo" }] }),
+      );
+      return server as unknown as McpServer;
+    });
+    const { app, sessions } = createSseApp(serverFactory, options);
+    const httpServer = app.listen(0);
+    openServers.push(httpServer);
+    const { port } = httpServer.address() as AddressInfo;
+    return { port, sessions, serverFactory };
+  }
+
+  it("completes a real client handshake and request over POST /mcp", async () => {
+    const { port, serverFactory } = listen();
+
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+    await client.connect(transport);
+
+    const tools = await client.listTools();
+    expect(tools.tools.map((t) => t.name)).toContain("echo");
+
+    await client.close();
+    expect(serverFactory).toHaveBeenCalled();
+  });
+
+  it("does not assign streamable sessions (stateless)", async () => {
+    const { port } = listen();
+
+    const res = await fetch(`http://localhost:${port}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "probe", version: "1.0.0" },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("mcp-session-id")).toBeNull();
+    await res.text();
+  });
+
+  it("GET /mcp answers 405", async () => {
+    const { port } = listen();
+
+    const res = await fetch(`http://localhost:${port}/mcp`);
+    expect(res.status).toBe(405);
+  });
+
+  it("DELETE /mcp answers 405", async () => {
+    const { port } = listen();
+
+    const res = await fetch(`http://localhost:${port}/mcp`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(405);
+  });
+
+  it("rejects POST /mcp without token when auth is enabled", async () => {
+    const { port } = listen({ authToken: "test-token" });
+
+    const res = await fetch(`http://localhost:${port}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("allows POST /mcp with valid token when auth is enabled", async () => {
+    const { port } = listen({ authToken: "test-token" });
+
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+      {
+        requestInit: {
+          headers: { Authorization: "Bearer test-token" },
+        },
+      },
+    );
+    await client.connect(transport);
+    const tools = await client.listTools();
+    expect(tools.tools.map((t) => t.name)).toContain("echo");
+    await client.close();
+  });
+
+  it("coexists with the legacy SSE transport", async () => {
+    const { port, sessions } = listen();
+
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+    await client.connect(transport);
+    await client.close();
+
+    const controller = new AbortController();
+    try {
+      const res = await fetch(`http://localhost:${port}/sse`, {
+        signal: controller.signal,
+      });
+      expect(res.status).toBe(200);
+      expect(sessions.size).toBe(1);
+    } finally {
+      controller.abort();
+    }
   });
 });
