@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import cors from "cors";
 import type { Server as HttpServer } from "node:http";
@@ -93,6 +94,67 @@ export function createSseApp(
     await transport.handlePostMessage(req, res, req.body);
   });
 
+  // Streamable HTTP transport (stateless): one fresh server and transport
+  // per POST request, no session IDs. Clients that only speak Streamable
+  // HTTP (for example opencode V2's remote MCP client) POST here; legacy
+  // SSE clients keep using /sse + /messages. Both mounts coexist.
+  app.post("/mcp", async (req, res) => {
+    try {
+      const server = serverFactory();
+      // `sessionIdGenerator: undefined` selects stateless mode (documented in
+      // the SDK's JSDoc). The SDK's option and Transport types predate
+      // exactOptionalPropertyTypes and reject that documented spelling,
+      // hence the two casts below.
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      } as unknown as ConstructorParameters<
+        typeof StreamableHTTPServerTransport
+      >[0]);
+
+      res.on("close", () => {
+        void transport.close();
+        void server.close();
+        options?.onSessionClose?.(server);
+      });
+
+      await server.connect(
+        transport as unknown as Parameters<McpServer["connect"]>[0],
+      );
+      await transport.handleRequest(req, res, req.body);
+    } catch (error) {
+      console.error("Streamable HTTP request failed:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal server error" },
+          id: null,
+        });
+      }
+    }
+  });
+
+  // The server has no use for the optional server-to-client stream, so
+  // GET and DELETE answer 405 as the Streamable HTTP spec allows.
+  app.get("/mcp", async (_req, res) => {
+    res.writeHead(405, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Method not allowed." },
+        id: null,
+      }),
+    );
+  });
+
+  app.delete("/mcp", async (_req, res) => {
+    res.writeHead(405, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Method not allowed." },
+        id: null,
+      }),
+    );
+  });
+
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const status = (err as { status?: number; statusCode?: number }).status
       ?? (err as { status?: number; statusCode?: number }).statusCode
@@ -117,7 +179,8 @@ export interface TransportHandle {
  * Start the MCP server on the selected transport.
  *
  * - stdio: single-client, reads/writes stdin/stdout (default)
- * - sse:   multi-client HTTP, one SSE stream per client
+ * - sse:   multi-client HTTP, one SSE stream per client, plus a stateless
+ *          Streamable HTTP endpoint on /mcp for clients that POST only
  */
 export async function startTransport(
   type: TransportType,
@@ -151,7 +214,7 @@ export async function startTransport(
 
   const httpServer: HttpServer = await new Promise((resolve) => {
     const s = app.listen(port, host, () => {
-      console.error(`SSE transport listening on http://${host}:${port}/sse`);
+      console.error(`HTTP transport listening on http://${host}:${port}/sse (SSE) and /mcp (Streamable HTTP)`);
       resolve(s);
     });
   });

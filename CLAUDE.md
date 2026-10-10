@@ -50,7 +50,7 @@ Entry point: `src/index.ts` — composition root, reads env vars, wires dependen
 - **Embedding Strategy** (`index.ts`): auto-selects provider — local `TransformersEmbeddingProvider` (zero-setup) or `OllamaEmbeddingProvider` when `OLLAMA_URL` is set and reachable
 - **Workflow** (`workflow-state.ts`, `hints.ts`): Petri net state machine (IDLE → EXPLORING → EDITING → REVIEWING); contextual hints appended to all tool responses
 - **Fuzzy Matching** (`fuzzy-match.ts`): Levenshtein-based typo resilience for edit operations
-- **Transport** (`transport.ts`): dual transport — stdio (default, single client) or SSE over HTTP (multi-client); each SSE connection gets its own McpServer + WorkflowStateMachine while sharing fs/vector/embedder deps
+- **Transport** (`transport.ts`): dual transport — stdio (default, single client) or SSE over HTTP (multi-client); each SSE connection gets its own McpServer + WorkflowStateMachine while sharing fs/vector/embedder deps. The HTTP mode also mounts a stateless Streamable HTTP endpoint (`POST /mcp`, one fresh server per request, no session IDs; `GET`/`DELETE /mcp` answer 405) for clients that POST only — SSE and Streamable HTTP coexist on the same port and auth
 - **Vault Search** (`vault-search.ts`): cross-vault lexical keyword search using FragmentRetriever — no embeddings required; supports optional directory scoping
 - **Freeform Editor** (`freeform-editor.ts`): line-range replacement and literal string find/replace as fallback for non-AST content
 - **Read by Heading** (`read-by-heading.ts`): AST-based section extraction — reads content under a specific heading (up to next same-or-higher-level heading) to save context window space; returns suggestions/guidance if heading not found
@@ -79,7 +79,7 @@ All file operations route through `SafePath` value object — prevents path trav
 | `OLLAMA_DIMENSIONS` | `768` | Ollama embedding vector dimensions |
 | `VECTOR_STORE_URL` | *(unset)* | Set to use Qdrant (e.g. `http://localhost:6333`). If unset, local persisted flat store is used. |
 | `VECTOR_STORE_RESET` | `false` | Set to `true` to auto-delete a mismatched vector index on startup and rebuild from scratch. |
-| `MCP_AUTH_TOKEN` | *(unset)* | Bearer token for SSE transport auth. If set, all SSE endpoints require `Authorization: Bearer <token>`. |
+| `MCP_AUTH_TOKEN` | *(unset)* | Bearer token for HTTP transport auth. If set, all HTTP endpoints (`/sse`, `/messages`, `/mcp`) require `Authorization: Bearer <token>`. |
 
 Vector stores may implement the optional `IVectorStore.getFileChunks` read-back; stores that omit it (e.g. a Qdrant adapter) always re-embed on re-index.
 
