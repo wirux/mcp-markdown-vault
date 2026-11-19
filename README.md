@@ -79,7 +79,7 @@
 | ✏️ **edit** | `append` `prepend` `replace` `delete` `line_replace` `string_replace` `frontmatter_set` + `operations[]` batch mode | AST-based patching + freeform fallback + frontmatter update + batch edit (supports `dryRun` diff preview) |
 | 👁️ **view** | `search` `global_search` `semantic_search` `outline` `read` `frontmatter_get` `bulk_read` `backlinks` | Fragment retrieval, cross-vault search, hybrid semantic search, read by heading, frontmatter read, bulk read, backlinks |
 | 🔄 **workflow** | `status` `transition` `history` `reset` | Petri net state machine control |
-| ⚙️ **system** | `status` `reindex` `overview` `overview_status` `prepare_overview` `save_overview` | Server health, indexing info, vault structure overview, assisted overview rebuild |
+| ⚙️ **system** | `status` `reindex` `refresh` `overview` `overview_status` `prepare_overview` `save_overview` | Server health, indexing info, vault structure overview, assisted overview rebuild |
 
 > All tool responses include contextual hints based on the current workflow state.
 
@@ -98,6 +98,7 @@
 - **`bulk_read`**: Use this to read 2 or more files/sections concurrently. It is significantly faster than multiple sequential `view.read` calls.
 - **Workflow State**: The `workflow` tool manages session-specific state used for contextual hints. It does **not** modify vault data or search indexes.
 - **`system.reindex`**: Only use this for recovery or after making out-of-band file changes (e.g., via external scripts). Normal MCP edits automatically update backlinks and queue vector indexing.
+- **`system.refresh`**: The cheap variant for out-of-band changes. It walks the vault without the force flag, so unchanged notes are skipped by the chunk comparison and only new/changed notes are (re-)embedded. Reserve `reindex` (which force re-embeds the entire vault) for repairing corrupted vectors.
 - **`view.outline`**: Supports a `directory` parameter to get a flat list of headings across multiple files in a folder.
 
 ### 🧪 Batch Edits

@@ -590,9 +590,9 @@ export function createMcpServer(deps: McpDependencies): McpServer {
   server.registerTool("system", {
     title: "System",
     description:
-      `System administration for this vault (${vaultScope}). Actions: status (indexing/backlinks/workflow health), reindex (async rebuild), overview (folder tree), overview_status (meta/overview.md state), prepare_overview (gather evidence), save_overview (persist host-written overview).`,
+      `System administration for this vault (${vaultScope}). Actions: status (indexing/backlinks/workflow health), reindex (async full force re-embed of the entire vault — heavy repair tool), refresh (async, embeds new/changed notes only — cheap post-write step), overview (folder tree), overview_status (meta/overview.md state), prepare_overview (gather evidence), save_overview (persist host-written overview).`,
     inputSchema: {
-      action: z.enum(["status", "reindex", "overview", "overview_status", "prepare_overview", "save_overview"]),
+      action: z.enum(["status", "reindex", "refresh", "overview", "overview_status", "prepare_overview", "save_overview"]),
       maxDepth: z.number().optional().describe("Maximum folder depth for overview (default 3)."),
       overview: z.string().optional().describe("Overview text to save (required for save_overview action)."),
       scope: z.string().optional().describe("One-line vault routing hint, max 200 chars (required for save_overview action). Should describe what information agents can find here."),
@@ -617,6 +617,30 @@ export function createMcpServer(deps: McpDependencies): McpServer {
             failureCount: health.failureCount,
             lastFailure: health.lastFailure,
           };
+        }
+        case "refresh": {
+          if (deps.indexer) {
+            // Cheap post-write pass: no force flag, so indexFile's chunk
+            // comparison skips unchanged notes and only new/changed notes
+            // are (re-)embedded.
+            deps.indexer.indexAll({})
+              .then(async () => {
+                if (deps.backlinkIndex) {
+                  const allFiles = await deps.fsAdapter.listNotes();
+                  const entries = await Promise.all(
+                    allFiles.map(async (p) => ({
+                      path: p,
+                      content: await deps.fsAdapter.readNote(p),
+                    })),
+                  );
+                  deps.backlinkIndex.rebuildIndex(entries);
+                }
+              })
+              .catch((err: unknown) =>
+                console.error("Refresh failed:", err),
+              );
+          }
+          return { message: "Refresh triggered (async, changed notes only)" };
         }
         case "reindex": {
           if (deps.indexer) {
