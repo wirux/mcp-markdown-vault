@@ -800,6 +800,112 @@ describe("VaultIndexer", () => {
   });
 });
 
+// ── Embed-failure resilience ──────────────────────────────────────
+
+class FlakyEmbeddingProvider extends FakeEmbeddingProvider {
+  failing = false;
+
+  override async embed(text: string): Promise<number[]> {
+    if (this.failing) throw new Error("embedding server down");
+    return super.embed(text);
+  }
+}
+
+describe("VaultIndexer — embed failure resilience", () => {
+  let flakyDir: string;
+  let flakyStore: InMemoryVectorStore;
+  let flakyEmbedder: FlakyEmbeddingProvider;
+  let flakyWatcher: MockFileWatcher;
+  let flakyIndexer: VaultIndexer;
+
+  beforeEach(async () => {
+    flakyDir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-indexer-flaky-"));
+    await fs.writeFile(
+      path.join(flakyDir, "note.md"),
+      "# Note\n\nOriginal content.\n",
+    );
+    flakyStore = new InMemoryVectorStore();
+    flakyEmbedder = new FlakyEmbeddingProvider();
+    flakyWatcher = new MockFileWatcher();
+    const flakyFsAdapter = await LocalFileSystemAdapter.create(flakyDir);
+    flakyIndexer = new VaultIndexer(
+      flakyDir,
+      flakyStore,
+      flakyEmbedder,
+      flakyWatcher,
+      flakyFsAdapter,
+    );
+  });
+
+  afterEach(async () => {
+    await fs.rm(flakyDir, { recursive: true, force: true });
+  });
+
+  it("keeps stored vectors and records the failure when an embed fails in processQueue", async () => {
+    await flakyIndexer.indexFile("note.md");
+    const before = await flakyStore.getFileChunks("note.md");
+    expect(before).toBeDefined();
+    expect(before!.length).toBeGreaterThan(0);
+
+    flakyEmbedder.failing = true;
+    await fs.writeFile(
+      path.join(flakyDir, "note.md"),
+      "# Note\n\nChanged content.\n",
+    );
+    flakyIndexer.enqueue("note.md");
+    await flakyIndexer.processQueue();
+
+    const after = await flakyStore.getFileChunks("note.md");
+    expect(after).toEqual(before);
+
+    const health = await flakyIndexer.getHealthStatus();
+    expect(health.failureCount).toBe(1);
+    expect(health.lastFailure?.source).toBe("note.md");
+  });
+
+  it("keeps stored vectors when an embed fails in the watcher drain path", async () => {
+    await flakyIndexer.indexFile("note.md");
+    const before = await flakyStore.getFileChunks("note.md");
+    expect(before).toBeDefined();
+
+    await flakyIndexer.startWatching({ debounceMs: 10 });
+
+    flakyEmbedder.failing = true;
+    await fs.writeFile(
+      path.join(flakyDir, "note.md"),
+      "# Note\n\nChanged again.\n",
+    );
+    flakyWatcher.emit("change", path.join(flakyDir, "note.md"));
+    await sleep(120);
+
+    const after = await flakyStore.getFileChunks("note.md");
+    expect(after).toEqual(before);
+
+    const health = await flakyIndexer.getHealthStatus();
+    expect(health.failureCount).toBe(1);
+    expect(health.lastFailure?.source).toBe("note.md");
+  });
+
+  it("re-embeds the note on a later pass once the embedder recovers", async () => {
+    await flakyIndexer.indexFile("note.md");
+    flakyEmbedder.failing = true;
+    await fs.writeFile(
+      path.join(flakyDir, "note.md"),
+      "# Note\n\nRecovered content.\n",
+    );
+    flakyIndexer.enqueue("note.md");
+    await flakyIndexer.processQueue();
+
+    flakyEmbedder.failing = false;
+    flakyIndexer.enqueue("note.md");
+    await flakyIndexer.processQueue();
+
+    const chunks = await flakyStore.getFileChunks("note.md");
+    expect(chunks).toBeDefined();
+    expect(chunks!.some((c) => c.text.includes("Recovered content."))).toBe(true);
+  });
+});
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

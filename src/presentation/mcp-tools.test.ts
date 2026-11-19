@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -1234,5 +1234,67 @@ describe("MCP Server — structured edit response fields", () => {
     const editTool = result.tools.find((t) => t.name === "edit");
     const schema = editTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
     expect(schema?.properties).toHaveProperty("returnContent");
+  });
+});
+
+// ── system tool — refresh vs reindex force semantics ─────────────
+
+describe("system tool — refresh vs reindex force semantics", () => {
+  it("refresh calls indexAll without force; reindex forces a full rebuild", async () => {
+    const refreshTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "mcp-refresh-test-"));
+    await fs.writeFile(
+      path.join(refreshTmpDir, "note.md"),
+      "# Note\n\nContent.\n",
+    );
+    const fsAdapter = await LocalFileSystemAdapter.create(refreshTmpDir);
+    const vectorStore = new InMemoryVectorStore();
+    const embedder = new FakeEmbedder();
+    const workflow = new WorkflowStateMachine();
+    const indexer = new VaultIndexer(
+      refreshTmpDir,
+      vectorStore,
+      embedder,
+      new StubFileWatcher(),
+      fsAdapter,
+    );
+    const spy = vi.spyOn(indexer, "indexAll");
+
+    const refreshDeps: McpDependencies = {
+      fsAdapter,
+      vectorStore,
+      embedder,
+      workflow,
+      vaultRoot: refreshTmpDir,
+      indexer,
+    };
+    const server = createMcpServer(refreshDeps);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const refreshClient = new Client({ name: "refresh-client", version: "1.0.0" });
+    await server.connect(serverTransport);
+    await refreshClient.connect(clientTransport);
+
+    const r1 = await refreshClient.callTool({
+      name: "system",
+      arguments: { action: "refresh" },
+    });
+    const msg1 = JSON.parse((r1.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(msg1.result.message).toContain("changed notes only");
+
+    const r2 = await refreshClient.callTool({
+      name: "system",
+      arguments: { action: "reindex" },
+    });
+    const msg2 = JSON.parse((r2.content as Array<{ type: string; text: string }>)[0]!.text);
+    expect(msg2.result.message).toContain("Re-indexing triggered");
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls[0]![0]).toEqual({});
+    expect(spy.mock.calls[1]![0]).toEqual({ force: true });
+
+    // Let the async indexAll passes settle before tearing down.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await refreshClient.close();
+    await server.close();
+    await fs.rm(refreshTmpDir, { recursive: true, force: true });
   });
 });
