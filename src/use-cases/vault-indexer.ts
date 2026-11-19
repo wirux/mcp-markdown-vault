@@ -229,8 +229,13 @@ export class VaultIndexer {
           await this.removeFile(relPath);
           continue;
         }
-        // Genuine indexing failure (embed/read/upsert error on an existing file).
-        await this.removeFile(relPath);
+        // Genuine indexing failure (embed/read/upsert error on an existing
+        // file). Keep the stored vectors: the note stays searchable and the
+        // next pass retries it. Deleting here turns a transient embedding
+        // outage into a full re-embed of every affected note.
+        this.failureCount++;
+        this.lastFailureTime = new Date();
+        this.lastFailureSource = relPath;
       }
     }
   }
@@ -257,7 +262,6 @@ export class VaultIndexer {
             this.failureCount++;
             this.lastFailureTime = new Date();
             this.lastFailureSource = relPath;
-            await this.removeFile(relPath);
           }
         }
       }
